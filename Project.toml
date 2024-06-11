@@ -1,0 +1,7 @@
+name = "wavegem"
+uuid = "6011d0f7-d76f-49c4-8f77-b6f9c9cc8d8a"
+authors = ["Andreas <andreas.paradis@outlook.com>"]
+version = "0.1.0"
+
+[deps]
+PkgTemplates = "14b8a8f1-9102-5b29-a752-f990bacb7fe1"
