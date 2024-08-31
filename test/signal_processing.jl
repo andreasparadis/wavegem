@@ -96,9 +96,9 @@ function phase_shift(arg)
     end
 
     return N
-  end
+end
 
-  function UpDownCross(intime, indata, cs)
+function UpDownCross(intime, indata, cs)
     indata[:, 1] .-= mean(indata[:, 1])
 
     if cs == 0
@@ -118,4 +118,12 @@ function phase_shift(arg)
     end
 
     return H, T, iD
+end
+
+function low_pass_filter(x,fcut,fsamp,Ntaps)
+    responsetype = Lowpass(fcut; fs=fsamp)
+    designmethod = FIRWindow(hanning(Ntaps; zerophase=false))
+    xₗₚ = filtfilt(digitalfilter(responsetype, designmethod), x)
+
+    return xₗₚ
 end

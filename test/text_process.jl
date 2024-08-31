@@ -1,16 +1,45 @@
+function parse_fxw(fid, hdl)
+    # Parse fixed width data from a .txt file in the library folder
+    # fid: file path,   
+    # skiphead = 0,1: The file has a header that must be skipped (No,Yes)
+
+
+    open(fid, "r")
+    if hdl == 0
+        content = readdlm(fid, '\n')
+    else
+        content = readdlm(fid, skipstart=hdl, '\n')
+        println("$hdl header lines have been skipped.")
+    end
+
+    NoRows = length(content)
+    NoCols = length(split(content[1]))
+
+    Parsed_content = zeros(Float64,NoRows, NoCols)
+
+    for i ∈ 1:NoRows
+        for j ∈ 1:NoCols
+            tmp = split(content[i])
+            Parsed_content[i,j] = parse(Float64, tmp[j])
+        end
+    end
+
+    return Parsed_content
+end
+
 function parse_fxw_pf(fid, w_new, hdl)
-    ## Parse fixed width data from a plain format file in the library folder
+    ## Parse fixed width data from a text file
     # fid: file path,   
     # w_new=0,1: write parsed data to new file (No,Yes),
     # hdl: Header lines to be skipped
 
-    fid_new  = fid * ".txt" # Path to new file
+    fid_new  = fid * "_new" # Path to new file
 
-    open("library/"*fid, "r")
+    open(fid, "r")
     if hdl == 0
-        content = readdlm("library/"*fid, '\n')
+        content = readdlm(fid, '\n')
     else
-        content = readdlm("library/"*fid, skipstart=hdl, '\n')
+        content = readdlm(fid, skipstart=hdl, '\n')
         println("$hdl header lines have been skipped.")
     end
 
@@ -27,7 +56,7 @@ function parse_fxw_pf(fid, w_new, hdl)
     end
 
     if w_new == 1
-        writedlm("library/"*fid_new, Parsed_content, '\t')
+        writedlm(fid_new, Parsed_content, '\t')
     end
 
     return Parsed_content

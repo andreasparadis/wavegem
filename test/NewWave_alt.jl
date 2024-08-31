@@ -13,7 +13,7 @@ include("signal_processing.jl")
 include("jonswap.jl")
 include("wave_theory.jl")
 
-Hₛ, Tₚ, Tᵢ, Tₑ, γ, g::Float64 = 5.3, 8.0, 1.6, 25, 3.3, 9.81
+Hₛ, Tₚ, Tᵢ, Tₑ, γ, g::Float64 = 5.3, 8.0, 1.6, 25, 1, 9.81
 x₀::Float64 = 0.0
 
 dt = 0.1;   tend = 100
@@ -79,7 +79,7 @@ plot(t, ηₓ./α, xlab = L"\tau~[s]", ylab = L"\frac{\eta}{\alpha}~[-]", lw=3)
 display(plot!(twiny(),χ, [ηₓ./α ηₜ./α], xlab = L"\chi~[m]", lab = [L"(\chi,\tau)=(0,\tau)" L"(\chi,\tau)=(\chi,0)"], ls=[:solid :dot], lw=3))
 # savefig("NewWave.svg")
 plot(freq, mag, xlab = L"f~[Hz]", ylab = L"Magnitude", lab = "Single-sided Spectrum", lw=3)
-
+plot!(xlim=(0,fⱼ[end]))
 # fid0 = "library/SE/LAF/2/Decomposition/events/NewWave2"
 # open(fid0, "w")
 # writedlm(fid0, [t ηₓ], '\t')

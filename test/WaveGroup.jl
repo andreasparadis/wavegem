@@ -39,8 +39,8 @@ for i ∈ 1:NG
     for n ∈ 1:N
         η̂[n] = H₀/m₀ * Sⱼ[n]*df  
         for m ∈ 1:M
-            ηₜ[m] = ηₜ[m] + A[n]*η̂[n] * cos(-ω[n]*t[m]+ϕ[i])
-            # ηₜ[m] = ηₜ[m] + η̂[n] * cos(-ω[n]*t[m]+ϕ[i])
+            # ηₜ[m] = ηₜ[m] + A[n]*η̂[n] * cos(-ω[n]*t[m]+ϕ[i])
+            ηₜ[m] = ηₜ[m] + η̂[n] * cos(-ω[n]*t[m]+ϕ[i])
         end
     end
 end

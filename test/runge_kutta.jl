@@ -36,7 +36,7 @@ function RK4(x,y0,f, scheme)
     return y
 end
 
-function RK4_nln_sys(x,y0,f)
+function RK4_nln_sys(x,y0,f,ylb,yub, ϵₒ)
 
     L = length(x)
     W = length(y0)
@@ -46,14 +46,31 @@ function RK4_nln_sys(x,y0,f)
 
     w = [1/6; 1/3; 1/3; 1/6]
 
-    for i ∈ 1:L-1
+    ϵ = 1
+    ϵⱼ = ones(Float64, W)
+    i = 1
+    while ϵ>ϵₒ && i<L
         k₁ = Δx * f(x[i], y[i,:])
         k₂ = Δx * f(x[i]+Δx/2, y[i,:].+k₁/2)
         k₃ = Δx * f(x[i]+Δx/2, y[i,:].+k₂/2)
         k₄ = Δx * f(x[i+1], y[i,:].+k₃)
 
         y[i+1,:] = y[i,:] + w[1]*k₁ + w[2]*k₂ + w[3]*k₃ + w[4]*k₄
+
+        for j ∈ 1:W
+            ϵⱼ[j] = abs((y[i+1,j]-y[i,j])/y[i,j])
+           if y[i+1,j] < ylb
+            y[i+1,j] = max(y[i,j],ylb)
+           elseif y[i+1,j] > yub
+            y[i+1,j] = min(y[i,j],yub)
+           end 
+        end
+
+        ϵ = maximum(ϵⱼ)
+        i = i + 1
     end
 
-    return y[end,:], y
+    Y = y[1:i,:]
+
+    return Y[end,:], Y, ϵⱼ
 end
