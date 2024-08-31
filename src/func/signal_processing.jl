@@ -96,9 +96,9 @@ function phase_shift(arg)
     end
 
     return N
-  end
+end
 
-  function UpDownCross(intime, indata, cs)
+function UpDownCross(intime, indata, cs)
     indata[:, 1] .-= mean(indata[:, 1])
 
     if cs == 0
@@ -187,4 +187,12 @@ function decomp_3rd(t0, A0, A1, A2, A3)
     sig_recon = real(lin+plus2+third+minus2)
 
     return SPEC0, AMPS, ARGS, sig_comps, sig_recon, L, fₚ
+end
+
+function low_pass_filter(x,fcut,fsamp,Ntaps)
+    responsetype = Lowpass(fcut; fs=fsamp)
+    designmethod = FIRWindow(hanning(Ntaps; zerophase=false))
+    xₗₚ = filtfilt(digitalfilter(responsetype, designmethod), x)
+
+    return xₗₚ
 end

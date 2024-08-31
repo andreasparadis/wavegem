@@ -1,3 +1,32 @@
+function parse_fxw(fid, hdl)
+    # Parse fixed width data from a .txt file in the library folder
+    # fid: file path,   
+    # skiphead = 0,1: The file has a header that must be skipped (No,Yes)
+
+
+    open(fid, "r")
+    if hdl == 0
+        content = readdlm(fid, '\n')
+    else
+        content = readdlm(fid, skipstart=hdl, '\n')
+        println("$hdl header lines have been skipped.")
+    end
+
+    NoRows = length(content)
+    NoCols = length(split(content[1]))
+
+    Parsed_content = zeros(Float64,NoRows, NoCols)
+
+    for i ∈ 1:NoRows
+        for j ∈ 1:NoCols
+            tmp = split(content[i])
+            Parsed_content[i,j] = parse(Float64, tmp[j])
+        end
+    end
+
+    return Parsed_content
+end
+
 function parse_fxw_pf(fid, w_new, hdl)
     ## Parse fixed width data from a plain format file in the library folder
     # fid: file path,   
@@ -232,4 +261,82 @@ function read_ow3d_inp(fid)
     print("--------------------------------------------------------\n")
 
     return Lx, Nx, Nz, Tₚ, Hₛ, γ, d, max_kd, g, ρw
+end
+
+function write_ow3d_inp(path, wavein, Ldom, dx, Nz, tₑ, Nₜ, max_kd, λ⁺)
+    ρ, g, Ldom, d, Hₛ, Tₚ, γ, fcut = WAVEGEM.GlobInp0
+    
+    fid = "OceanWave3D.inp"
+    open(path*fid, "w")
+    
+    half_λ = round(λ⁺/10)*10 / 2
+
+    OutTpl = Vector{Tuple}(undef,23)
+
+    # 1: Header
+    OutTpl[1] = tuple("SE_JS_$(Hₛ)m_$(Tₚ)s")
+    # 2: Initial Conditions
+    dsc = " IC -- IncWaveType -- accel_tol_fact"
+    OutTpl[2] = (0, 2, 0.5, '\t','#',dsc)
+    # 3: Computational domain and resolution parameters
+    dsc = " Lx -- Ly -- Lz -- Nx -- Ny -- Nz -- GridX -- GridY -- GridZ -- GhostGridX -- GhostGridY -- GhostGridZ"
+    OutTpl[3] = (Ldom, 1, d, Int(Ldom/dx+1), 1, Nz, 0, 0, 1, 1, 1, 1, '\t','#',dsc)
+    # 4: Finite difference - Preconditioner
+    dsc = " alpha -- beta -- gamma -- alphaprecond -- betaprecond -- gammaprecond"
+    OutTpl[4] = (3, 3, 3, 1, 1, 1, '\t','#',dsc)
+    # 5: Time parameters
+    dsc = " Nsteps -- dt -- timeintegration scheme  -- CFL -- RK4 ExtrapolationON/OFF"
+    OutTpl[5] = (Nₜ-1, tₑ/(Nₜ-1), 1, 0, 0, 0, '\t','#',dsc)
+    # 6: Global constants
+    dsc = " gravitational acceleration -- water density"
+    OutTpl[6] = (g, ρ, '\t','#',dsc)
+    # 7: Solver parameters
+    dsc = " solver -- GMRES Precond -- CoarseStrat -- GMRESmaxiter -- reltol -- maxit -- cyclet -- pre-smooth -- post-smooth -- MGmaxgrids -- DOFbreven"
+    OutTpl[7] = (1, 1, 0, 50, 1e-8, 1e-6, 1, "V", 1, 1, 2, '\t','#',dsc)
+    # 8: Stream function solution parameters
+    dsc = " H -- h -- L -- T -- WAVELorPER -- uEorS -- EorS -- nsteps -- maxiter"
+    OutTpl[8] = (1, 1, 1, 1, 1, 1, 1, 1, 1, '\t','#',dsc)
+    # 9: Data storage info
+    dsc = " StoreDataOnOff -- formattype -- iKinematics  -- nOutFiles"
+    OutTpl[9] = (0, 20, 1, 5, '\t','#',dsc)
+    # 10: Probe 1 output
+    dsc = " xbeg -- xend -- xstride -- ybeg -- yend -- ystride -- tbeg -- tend -- tstride"
+    OutTpl[10] = (1, 1, 1, 1, 1, 1, 1, Nₜ-1, 1, '\t','#',dsc)
+    # 11: Probe 2 output
+    OutTpl[11] = (Int(100/dx+1), Int(100/dx+1), 1, 1, 1, 1, 1, Nₜ-1, 1, '\t','#',dsc)
+    # 12: Probe 3 output
+    OutTpl[12] = (Int(700/dx+1), Int(700/dx+1), 1, 1, 1, 1, 1, Nₜ-1, 1, '\t','#',dsc)
+    # 13: Probe 4 output
+    OutTpl[13] = (Int(1000/dx+1), Int(1000/dx+1), 1, 1, 1, 1, 1, Nₜ-1, 1, '\t','#',dsc)
+    # 14: Last timestep output
+    OutTpl[14] = (1, Int(Ldom/dx+1), 1, 1, 1, 1, Nₜ-1, Nₜ-1, 1, '\t','#',dsc)
+    # 15: Mode, applied free-surface pressure
+    dsc = " LinearONOFF -- PressureTermONOFF"
+    OutTpl[15] = (1, 0, '\t','#',dsc)
+    # 16: SG-FILTERING
+    dsc = " SG-filter on/off -- filter half width -- poly order -- sigma_filt(1) -- sigma_filt(2) -- sigma_filt(3)"
+    OutTpl[16] = (1, 6, 10, 0.08, 0.08, 0.4, '\t','#',dsc)
+    # 17: Relaxation zone setup
+    dsc = " relax zones on/off -- transient time -- no. zones -- XorY -- ?"
+    OutTpl[17] = (1, 5, 2, "X", 0, '\t','#',dsc)
+    # 18: Wave Generation Zone
+    dsc = " x1 -- x2 -- y1 -- y2 -- ftype -- param -- XorY -- WavegenONOFF -- XorYgen -- degrees(=IC rotation)"
+    OutTpl[18] = (0, half_λ, 0, 0, -9, 3.5, "X", 1, "X", 0, '\t','#',dsc)
+    # 19: Wave Absorption Zone
+    OutTpl[19] = (Ldom-half_λ, Ldom, 0, 0, 9, 3.5, "X", 0, "X", 0, '\t','#',dsc)
+    # 20: Damping Pressure Zones
+    dsc = " PDampingOnOff -- number of zones"
+    OutTpl[20] = (0, 0, '\t','#',dsc)
+    # 21: Damping pressure zone parameters
+    dsc = " x1 -- x2 -- y1 -- y2 -- gamma0 -- Gamma0 -- i_damperType"
+    OutTpl[21] = (0, 0, 0, 0, 0, 0, 0, '\t','#',dsc)
+    # 22: Curvelinear coordinates
+    dsc = " Curvilinear on/off"
+    OutTpl[22] = tuple(0, '\t','#',dsc)
+    # 23: Wave type parameters
+    dsc = " Wave type id -- Tp -- Hs -- d -- max(kh) -- seed1 -- seed2 -- xgenwave -- ygenwave -- wave file"
+    OutTpl[23] = (2, Tₚ, Hₛ, d, round(max_kd*10)/10, -1, -1, 0, 0, wavein, '\t','#',dsc)
+
+    writedlm(path*fid, OutTpl, " ")
+    return OutTpl
 end

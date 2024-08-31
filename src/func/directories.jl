@@ -24,7 +24,7 @@ function paths(pdir, run_id, phi_id, prb_id, flong)
     OW3Dpath::String = HOME*"/OW3D_Out/WAVEGEM"   # Path to OW3D simulation output folder
     OFASTpath::String = HardDrive*"/ONISILOS/OFAST"   # Path to OW3D simulation output folder
 
-    probes = ("x0", "x100", "x400", "x700", "x1000", "x1600") # OW3D probes
+    probes = ("x0", "x100", "x700", "x1000") # OW3D probes
 
     #############################################################################################
     ## Automate library directory
@@ -136,7 +136,7 @@ function js_case(Hₛ, Tₚ, γ, flag)
         elseif Tₚ == 10 && γ == 3.3
             Tpγ_id = "C"
         elseif Tₚ == 8 && γ == 2.0
-            Tpγ_id = "D"
+            Tpγ_id = "D"                    
         elseif Tₚ == 8 && γ == 5.0
             Tpγ_id = "E"
         else
