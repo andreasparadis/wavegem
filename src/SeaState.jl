@@ -5,6 +5,8 @@ export ηₜ, ϕ
 using Plots, LaTeXStrings, DelimitedFiles, Dates, LinearAlgebra, FFTW, DSP
 using Statistics, Random, Distributions
 
+gr(fontfamily = "Computer Modern", titlefont = (11, "New Century Schoolbook Bold"))
+
 include("WAVEGEM.jl")
 import .WAVEGEM
 
@@ -139,9 +141,11 @@ for i ∈ 1:lcont
 end
 
 if frec
-    fid::String = "INFO" # File name
-    open(phipath*fid, "w")
-    writedlm(phipath*fid, content, '\t')
+    if phi_id == 0
+        fid::String = "/RUN_INFO" # File name
+        open(rundir*fid, "w")
+        writedlm(rundir*fid, content, '\t')
+    end
 
     info1 = [string(dt)*" "*string(Nₜ)*" 1" " "]
     info2 = [string(1) " "]
@@ -156,6 +160,7 @@ if frec
     fid::String = "eta" # File name
     open(OW3Dphipath*fid, "w")
     writedlm(OW3Dphipath*fid, [head_o3d[1]; dt; ηₜ], '\t')
+    write_ow3d_inp(OW3Dphipath, fid, Ldom, dx, Nz, tₑ, Nₜ, max_kd, λ⁺)
 
     # Phase
     fid::String = "phi" # File name

@@ -1,13 +1,10 @@
-module Decomposition
 using Plots, LaTeXStrings, DelimitedFiles, Dates, LinearAlgebra
 using FFTW, DSP, Statistics, BSplineKit
 
 gr(fontfamily = "Computer Modern", titlefont = (11, "New Century Schoolbook Bold"))
 
-include("WAVEGEM.jl")
-import .WAVEGEM
-
 # Include necessary scripts for functions
+include("func/text_process.jl")
 include("func/signal_processing.jl")
 include("func/jonswap.jl")
 include("func/peak_detect.jl")
@@ -16,35 +13,46 @@ include("func/wave_theory.jl")
 include("func/event_proc.jl")
 
 #############################################################################################
-# Import Global Variables & Module specific inputs
-ρ, g, Ldom, d, _, _, γ, fcut = WAVEGEM.GlobInp0
-pdir, run_id, phi_id, prb_id = WAVEGEM.GlobInp1
-case_id, _, rundir = WAVEGEM.GlobPaths[2:4]
-Decpath, _, DecFigs = WAVEGEM.GlobPaths[9:11]
-OFASTpath = WAVEGEM.GlobPaths[end]
-Wave = WAVEGEM.Wave
-tstart = WAVEGEM.tstart; tend = WAVEGEM.tend
-frec, fplot = WAVEGEM.Dflags 
-sigf = WAVEGEM.DecSigs
-#############################################################################################
-# Make directories
-make_dirs(2, Decpath, DecFigs)
-make_dirs(2, OFASTpath*"/ExtElev/$(case_id)", OFASTpath*"/ExtElev/$(case_id)/$(run_id)")
+# Methods Definition
+mutable struct Wave 
+    f::Float64
+    T::Float64
+    ω::Float64
+    λ::Float64
+    κ::Float64
+    υᶜ::Float64
+end
+# Global Variables
+## Significant wave height [m], Peak period [s], peakedness [-], Cut-off frequency [Hz]
+Hₛ, Tₚ, γ, fcut::Float64 = 0.069, 1, 3.3, 4  # JONSWAP parameters 
+const ρ, g::Float64 = 1025.0, 9.81  # Sea water density [kg/m³], Accel. of gravity [m/s²]
+Ldom, d::Float64 = 10.0, 0.4    # [m] Domain length, Water depth
+
+prb_id::Int8 = 4    # Column No corresponding to probe at phase focusing location
+
+
+# Decpath =  "/home/andreasp/WAVEGEM/library/JFM/EV_2/G0/CB_DTA/"
+Decpath =  "/home/andreasp/WAVEGEM/library/JFM/FULL/"
+DecFigs = Decpath
+
+tstart = 0; tend = 512
+frec, fplot = Bool(1), Bool(1)
+# sigf = ("A00.txt", "A05.txt", "A10.txt", "A15.txt") # Signal files for decomposition
+sigf = ("FR1_1_0.txt", "FR1_1_piover2.txt", "FR1_1_pi.txt", "FR1_1_3piover2.txt") # Signal files for decomposition
 
 #############################################################################################
 # Import t-domain data for each pi/2 phase shifted realization
 ## Reference signal
 fid = Decpath*sigf[1] # Path to file
-open(fid, "r")
-A00 = readdlm(fid, '\t', Float64, '\n')
+fcont = parse_fxw(fid, 0)
+A00 = [fcont[:,1] fcont[:,prb_id]]
 
 ## Phase shifted signals
 ∅ = zeros(Float64, length(A00[:,1]),3);     A = ∅[:,:]
 for i ∈ 1:3
     fid = Decpath*sigf[i+1] # Path to file
-    open(fid, "r")
-    cont = readdlm(fid, '\t', Float64, '\n')
-    A[:,i] = cont[:,2] 
+    cont = parse_fxw(fid, 0)
+    A[:,i] = cont[:,prb_id] 
 end
 A05 = A[:,1];   A10 = A[:,2];   A15 = A[:,3] 
 
@@ -74,19 +82,19 @@ df = (FR1[end]-FR1[1])/(L/2)
 # Isolate, shift around 0 and plot 'pulses' based on peaks
 ## Find peaks and sort them in descending order
 ## Isolate peak sections given a specified t range
-t_range = 100  # [s]
-iNP = 5
+t_range = 20  # [s]
+iNP = 8
 shift = 2
 res_f = 100
 
-MinPeakVal = 3*std(A̅00)
-MinPeakDist = WAVEGEM.Tᵢ
+MinPeakVal = 2*std(A̅00)
+MinPeakDist = 1/fcut
 
 tₑᵥⁱ, ev_int, tₑᵥ, events, rng, Tₛᵉᵛ, PeakId, PeakPos, PeakVal, NP = 
     ev_identify(A̅00, tOG, MinPeakVal, MinPeakDist, t_range, iNP, shift, res_f)
 
 Val_LNR = sig_comps[:,1]
-MinPeakVal = 3*std(Val_LNR)
+MinPeakVal = 2*std(Val_LNR)
 
 Ltₑᵥⁱ, Lev_int, Ltₑᵥ, Levents, rng, LTₛᵉᵛ, L_PeakId, L_PeakPos, L_PeakVal, LNP = 
     ev_identify(Val_LNR, tOG, MinPeakVal, MinPeakDist, t_range, iNP, shift, res_f)
@@ -105,49 +113,53 @@ sslen = 5  # Signal section length[s]
 ρᴾ, R̅, σᴿ = sect_corr(sslen, dt, Levents)
 
 #############################################################################################
-# Examine extreme event
-# evdir::String = "MaxFair/"
-# evdir::String = "MaxPitch/"
-evdir::String = "MaxWave/"
+# Examine most extreme event
+Aₑᵥ = ev_int[:,1]
+tev = tₑᵥⁱ[:,1]
 
-if !isdir(Decpath*evdir)
-    mkdir(Decpath*evdir)
-end
-
-# lb = PeakId[evID]-rng; ub = lb+2*rng 
-lb = 20351; ub = lb + 2000 
-tpart = tOG[lb:ub]; Lₚ = length(tpart)
-
-Aₑₑ = A̅00[lb:ub]
-Aₑₑ¹ = Val_LNR[lb:ub]
-tₑₑ = tOG[lb:ub] .- tOG[lb]
-
-evID = 1
-# Aₑₑ = ev_int[:,evID]
-# tₑₑ = tₑᵥⁱ[:,evID]
-
-fr_ev, mag_ev, phi,_,_,Nfft, H = one_side_asp(Aₑₑ¹, tₑₑ)
-itp_sp = interpolate(fr_ev, mag_ev, BSplineOrder(4))
-itp_phi = interpolate(fr_ev, phi, BSplineOrder(4))
+freq, mag, _,_,_,Nfft, H = one_side_asp(Aₑᵥ, tev)
+itp_sp = interpolate(freq, mag, BSplineOrder(4))
 FR = range(0,fcut, Nfft)
 MAG = itp_sp.(FR)
-PHI = itp_phi.(FR)
 EV = ifft(H)
-# dtEV = (tₑₑ[end]-tₑₑ[1])/(Nfft)
-tEV = zeros(Float64,Nfft)
-tEV[1:Lₚ] = tₑₑ[:]
-# [tEV[i] = i*dt for i ∈ Lₚ:Nfft]
 
-plt_mag_itp = plot(fr_ev, mag_ev, lw=2, ylab = L"Amplitude", lab="Event")
-plot!(FR, MAG, line =:dot, lw=2, lab="Interpolation")
+plt_spitp = plot(freq, mag, lw=2, xlab = "f [Hz]", ylab = L"Amplitude", lab="Max event")
+plot!(FR, MAG, line =:dashdot, lw=2, lab="Interpolation")
 plot!(xlim=(0,fcut))
 
-plt_phi_itp = plot(fr_ev, phi, lw=2, xlab = "f [Hz]", ylab = L"\phi [rad]", lab="Event")
-plot!(FR, PHI, line =:dot, lw=2, lab="Interpolation")
-plot!(xlim=(0,fcut))
+#############################################################################################
+if frec
+    # Surface η (temporal)
+    fid_elev::String = "eta_lin" # File name
+    open(Decpath*fid_elev, "w")
+    writedlm(Decpath*fid_elev, [tOG Val_LNR], '\t')
 
-plt_sp_itp = plot(plt_mag_itp, plt_phi_itp, layout = @layout [a; b])
+    # Surface η spectrum
+    fid_elev::String = "eta_lin_spec" # File name
+    open(Decpath*fid_elev, "w")
+    writedlm(Decpath*fid_elev, [FR1 AMPS[:,1]], '\t')
 
+    # # Event
+    # evdir::String = "events/"
+    # # if isdir(evdir)
+    # #     error("Andreas: This folder already exists, since this event has already been recorded!")
+    # # else
+    # #     mkdir("library/"*Decpath*evdir)
+    # # end
+
+    # fid_ev::String = "event_1" # File name
+    # open(Decpath*evdir*fid_ev, "w")
+    # writedlm(Decpath*evdir*fid_ev, [tpart A̅00[lb:ub]], '\t')
+
+    # # lbe = Int(round(360/dt)); ube = Int(round(415/dt))
+    # # fid_ev::String = "event_2" # File name
+    # # open("library/"*Decpath*evdir*fid_ev, "w")
+    # # writedlm("library/"*Decpath*evdir*fid_ev, [tOG[lbe:ube] A̅00[lbe:ube]], '\t')
+
+    # fid_ev::String = "event_1_int" # File name
+    # open(Decpath*evdir*fid_ev, "w")
+    # writedlm(Decpath*evdir*fid_ev, [tOG Aₑᵥ], '\t')
+end
 #############################################################################################
 ## PLOTS 
 if fplot
@@ -158,14 +170,18 @@ if fplot
     Tₑ = round(2π/ω⁻) # Maximum period
 
     Hₛ = 4*std(A̅00)
-    ω⁺ = 2π/WAVEGEM.Tᵢ
+    ω⁺ = 2π*fcut
     dω = 2π/((nₜ-1)*dt)
     Ncut = Int64(round((ω⁺-ω⁻)/dω))
     Tₚ = 1/fₚ
 
-    fⱼ,Sⱼ = spectrum(Hₛ,Tₚ,γ,WAVEGEM.Tᵢ,Tₑ,Ncut) # Generate JONSWAP spectrum
+    fⱼ,Sⱼ = spectrum(Hₛ,Tₚ,γ,1/fcut,Tₑ,Ncut) # Generate JONSWAP spectrum
     dfⱼ = abs(fⱼ[end]-fⱼ[1])/(length(fⱼ)-1)
     η̂ = sqrt.(2*Sⱼ*dfⱼ)
+
+    # For partial plots
+    lb = PeakId[1]-rng; ub = lb+2*rng 
+    tpart = tOG[lb:ub]
 
     # 1: Decomposed signal and its components
     plt1 = plot(tpart, A̅00[lb:ub], lw = 2, lab = "Non-linear")
@@ -177,12 +193,12 @@ if fplot
     # plot!(legendcolumns=3)
 
     # 2: Reconstructed signal against the original
-    plt_recon = plot(tpart, A̅00[lb:ub], line =:solid, label = "Non-linear", legend=:topleft)
+    plt_recon = plot(tpart, A̅00[lb:ub], line =:solid, label = "Non-linear")
     plot!(tpart, sig_recon[lb:ub], line =:dash, color =:red, label = L"\sum components")
     plot!(title = "Comparison: Original vs Reconstructed Signal", xlab = "t [sec]", ylab = "η [m]")
 
     # 3: Interpolated event against original event
-    plt_itp = plot(tEV[1:Lₚ], real(EV[1:Lₚ]), line = :solid, lw = 1, lab = "Interpolation")
+    plt_itp = plot(tev, Aₑᵥ, line = :solid, lw = 1, lab = "Interpolation")
     plot!(twiny(), tpart, A̅00[lb:ub], line =:dash, color =:red, lw = 1, ylab = "η [m]", lab = "Non-linear")
     plot!(title = "Event at Highest Peak: Original vs Interpolated", xlab = "t [sec]")
 
@@ -221,33 +237,18 @@ if fplot
     plot!(xlim=(0,fcut), ylim=(1e-6,1), minorgrid=true)
 
     # 8:
-    fr_tmp, mag_tmp, _ = one_side_asp(Aₑₑ,tₑₑ)
+    freq, mag, _ = one_side_asp(Aₑᵥ,tev)
     plt_evsp = plot(FR1[flb:fub], Â₀₀[flb:fub], line =:dashdot, lab="Non-linear")
-    plot!(fr_tmp, mag_tmp, line =:solid, lab="Event")
-    plot!(fⱼ, η̂, lab="JONSWAP", color=:red, lw=2)
-    plot!(yscale=:log10, legendcolumns=1)
-    plot!(xlim=(0,fcut), ylim=(1e-6,1), minorgrid=true)
-    plot!(title = "Comparison of Spectra", xlab = L"f~[Hz]", ylab = L"S(f)~[m^2 s]")
-
-    # 9: Compare spectra of input signal and OW3D simulation
-    elev_fid::String = rundir*"/0/eta_t"
-    open(elev_fid, "r")   
-    elev = readdlm(elev_fid, '\t', Float64, skipstart=1, '\n')
-    tinp, ηinp = elev[:,1], elev[:,2]
-    frinp, maginp, _ = one_side_asp(ηinp,tinp)
-
-    plt_comp = plot(frinp, maginp, lab="Linear Sea State")
-    plot!(FR1[flb:fub], Â₀₀[flb:fub], line =:dot, lab="Non-linear")
-    plot!(FR1[flb:fub], AMPS[flb:fub,1], line =:dashdot, lw=1, opacity=0.8, lab = L"\mathbf{1_{st}}")
+    plot!(freq, mag, line =:solid, lab="Event")
     plot!(fⱼ, η̂, lab="JONSWAP", color=:red, lw=2)
     plot!(yscale=:log10, legendcolumns=1)
     plot!(xlim=(0,fcut), ylim=(1e-6,1), minorgrid=true)
     plot!(title = "Comparison of Spectra", xlab = L"f~[Hz]", ylab = L"S(f)~[m^2 s]")
    
-    # 10: 
-    h = PeakVal[evID]
+    # 9: 
+    h = PeakVal[1]
     plt_groups = plot(tOG, A̅00, xlab = "t [sec]", ylab = "η [m]",  label = "Non-linear")
-    for i ∈ 1:max(20, length(PeakVal))
+    for i ∈ 1:min(20, length(PeakVal))
         c = PeakPos[i]
         w = 25
         plot!(Shape([c-w,c-w,c+w,c+w],[-h,h,h,-h]), color=:red, opacity=0.2, label = "WG$i")
@@ -255,8 +256,7 @@ if fplot
     plot!(legend = false)
     
     # 11:
-    # c = PeakPos[evID]; w = 50
-    c = tOG[lb+1000]; w = 100
+    c = PeakPos[1]; w = 50
     plt_maxev = plot(tOG, A̅00, xlab = "t [sec]", ylab = "η [m]",  label = "Non-linear")
     plot!(Shape([c-w,c-w,c+w,c+w],[-h,h,h,-h]), color=:red, opacity=0.3, label = "Event")
     plot!(xlim=(c-10*w, c+10*w))
@@ -270,66 +270,36 @@ if fplot
     display(plt_ab)
     display(plt_sp)
     display(plt_evsp)
-    display(plt_comp)
     display(plt_groups)
     display(plt_maxev)
-    display(plt_sp_itp)
+    display(plt_spitp)
 
     # Figures to save
-    savefig(plt1, Decpath*evdir*"decomp_elev.png");   savefig(plt1, Decpath*evdir*"decomp_elev.svg")
-    savefig(plt_recon, Decpath*evdir*"elev_compare.png"); savefig(plt_recon, Decpath*evdir*"elev_compare.svg")
-    savefig(plt_maxev, Decpath*evdir*"XEvent.png");  savefig(plt_maxev, Decpath*evdir*"XEvent.svg")
-    savefig(plt_sp_itp, Decpath*evdir*"SP_event.png");  savefig(plt_sp_itp, Decpath*evdir*"SP_event.svg")
-
+    savefig(plt1, DecFigs*"decomp_elev.png");   savefig(plt1, DecFigs*"decomp_elev.svg")
+    savefig(plt_recon, DecFigs*"elev_compare.png"); savefig(plt_recon, DecFigs*"elev_compare.svg")
     savefig(plt_peaks, DecFigs*"elev_peaks_nln.png"); savefig(plt_peaks, DecFigs*"elev_peaks_nln.svg")
     savefig(plt_Lpeaks, DecFigs*"elev_peaks_lin.png"); savefig(plt_Lpeaks, DecFigs*"elev_peaks_lin.svg")
     savefig(plt_ab, DecFigs*"elev_pulses_compare.png"); savefig(plt_ab, DecFigs*"elev_pulses_compare.svg")
     savefig(plt_sp, DecFigs*"decomp_spectra.png"); savefig(plt_sp, DecFigs*"decomp_spectra.svg")
     # savefig(plt_evsp, Decpath*evdir*"event_spectra.png"); savefig(plt_evsp, Decpath*evdir*"event_spectra.svg")
-    savefig(plt_comp, DecFigs*"spect_comp.png"); savefig(plt_comp, DecFigs*"spect_comp.svg")
-    savefig(plt_groups, DecFigs*"events.png"); savefig(plt_groups, DecFigs*"events.svg")
+    savefig(plt_groups, DecFigs*"WGs.svg")
+    savefig(plt_maxev, DecFigs*"Event1.svg")
 end
+# # Find zero Up or Down Crossings
+# UCiD = findall(diff(sign.(A̅00)) .== 2)  # Up-crossing (-2 for Down-crossing)
+# UC_Val = A̅00[UCiD]
+# UC_Pos = tOG[UCiD]
 
-#############################################################################################
-if frec
-    # Surface η (temporal)
-    fid_elev::String = "eta_lin" # File name
-    open(Decpath*fid_elev, "w")
-    writedlm(Decpath*fid_elev, [tOG Val_LNR], '\t')
+# UCiD = findall(diff(sign.(Val_LNR)) .== 2)  # Up-crossing (-2 for Down-crossing)
+# L_UC_Val = Val_LNR[UCiD]
+# L_UC_Pos = tOG[UCiD]
 
-    # Surface η spectrum
-    fid_elev::String = "eta_lin_spec" # File name
-    open(Decpath*fid_elev, "w")
-    writedlm(Decpath*fid_elev, [FR1 AMPS[:,1]], '\t')
-
-    # JONSWAP parameters
-    fid_elev::String = "JONSWAP_pars" # File name
-    open(Decpath*fid_elev, "w")
-    head = ["Hₛ" "Tₚ" "γ" "Tᵢ" "Tₑ"]
-    row = round.([Hₛ Tₚ γ WAVEGEM.Tᵢ Tₑ]*1e3)./1e3
-    writedlm(Decpath*fid_elev, [head; row], '\t')
-
-    # Event
-    fid_ev::String = "event" # File name
-    open(Decpath*evdir*fid_ev, "w")
-    writedlm(Decpath*evdir*fid_ev, [tₑₑ Aₑₑ], '\t')
-    Ltₑᵥⁱ, Lev_int
-
-    fid_ev::String = "event_lin" # File name
-    open(Decpath*evdir*fid_ev, "w")
-    writedlm(Decpath*evdir*fid_ev, [tₑₑ Aₑₑ¹], '\t')
-
-    fid_ev::String = "SP_event" # File name
-    open(Decpath*evdir*fid_ev, "w")
-    writedlm(Decpath*evdir*fid_ev, [fr_ev mag_ev phi], '\t')
-
-    fid_ev::String = "event_int" # File name
-    open(Decpath*evdir*fid_ev, "w")
-    writedlm(Decpath*evdir*fid_ev, [real(EV) imag(EV) angle.(EV)], '\t')
-
-    fid_ev::String = "SP_event_int" # File name
-    open(Decpath*evdir*fid_ev, "w")
-    writedlm(Decpath*evdir*fid_ev, [FR MAG PHI], '\t')
-end
-
-end
+# # Plot original signal along with up crossing points
+# plt = plot(tOG, A̅00, line=:solid, color=:blue, lab="η")
+# plot!(UC_Pos, UC_Val, seriestype=:scatter, mc=:red, ms=2, lab = "Up-Crossing points")
+# plot!(
+#     xlim=(tstart, tstart+200),
+#     xlabel="t [sec]", ylabel="η [m]",
+#     legend=:topright
+# )
+# display(plt)
