@@ -20,7 +20,7 @@ include("func/directories.jl")
 #############################################################################################
 # Import Global Variables & Module specific inputs
 ρ, g, Ldom, d, Hₛ, Tₚ, γ, fcut = WAVEGEM.GlobInp0
-fₛ, Cr, A_id = WAVEGEM.SeaStateInp
+fₛ, Nₛ, Cr, A_id = WAVEGEM.SeaStateInp
 frec, fplot = WAVEGEM.SSflags 
 Wave = WAVEGEM.Wave
 #############################################################################################
@@ -64,6 +64,7 @@ end
 #############################################################################################
 ## Definition of temporal and spatial limits
 ωcut = 2π*fcut # [rad/s]
+Tₑ = WAVEGEM.Tₑ
 Tᵢ = WAVEGEM.Tᵢ
 tₑ = WAVEGEM.tₑ
 
@@ -80,30 +81,27 @@ short_wave = wave_qnts(Tᵢ,d)
 κ⁺ = short_wave.κ    
 υ⁻ = short_wave.υᶜ
 
-# Determine maximum period - Spectrum truncation (deep water assumption does not apply)
-Tₑ₀ = sqrt(2π/g * Ldom/2) # Initial guess for maximum period
+# Determine longest wave properties - Spectrum truncation (deep water assumption does not apply)
+T⁺₀ = sqrt(2π/g * Ldom) # Maximum period based on computational domain
 
-long_wave = wave_qnts(Tₑ₀,d)
+long_wave = wave_qnts(Tₑ,d)
 f⁻ = long_wave.f;   ω⁻ = long_wave.ω
 λ⁺ = long_wave.λ;   κ⁻ = long_wave.κ
 υ⁺ = long_wave.υᶜ
-
-Tₑ = round(2π/ω⁻) # Maximum period
 
 # Sampling frequency fs>=2*fcut=fnyq
 fnyq = 2*fcut
 ωₛ = 2π*fₛ
 dt = 1/fₛ
-Nₜ = Int64(round(tₑ/dt))+1
+Nₜ = Int64(round(tₑ/dt))
 
 # Discretization of JONSWAP frequency range
 max_kd = κ⁺*d
-df = 1/((Nₜ-1)*dt); dω = 2π*df  
-Nₛ = Int64(round((ω⁺-ω⁻)/dω))
+df = 1/tₑ; dω = 2π*df
 
 fⱼ,Sⱼ = spectrum(Hₛ,Tₚ,γ,Tᵢ,Tₑ,Nₛ) # Generate JONSWAP spectrum for pair (Hₛ,Tₚ) ∈ [Tᵢ,Tₑ]
 η̂, t, dt, ηₜ, u, u̇, ẇ, Φ, ηₜᵈ, ϕ, x, dx, Nₓ, ηₓ, z, dz, Nz, U = 
-    rand_sea(fⱼ, Sⱼ, Tₑ, dt, Nₜ, phi_id, A_id, Ldom, d, Cr, runstr[2:end])
+    rand_sea(fⱼ, Sⱼ, Tₑ, dt, Nₜ, phi_id, A_id, Ldom, d, Cr, runstr)
 
 #############################################################################################
 # Simulation info
@@ -127,7 +125,7 @@ content = ["JONSWAP: Hₛ=$Hₛ [m] , Tₚ=$Tₚ [sec] , γ=$γ , d=$d [m]";
         "dt = $dt [s]";
         "dx = $dx [m]";
         "dz = $dz [m]";
-        "Duration: $((Nₜ-1)*dt) [sec]";
+        "Duration: $(t[end]) [sec]";
         "Nₜ = $Nₜ";
         "Nₓ = $Nₓ";
         "Nₛ = $Nₛ";
@@ -142,9 +140,9 @@ end
 
 if frec
     if phi_id == 0
-        fid::String = "/RUN_INFO" # File name
-        open(rundir*fid, "w")
-        writedlm(rundir*fid, content, '\t')
+        fid::String = "RUN_INFO" # File name
+        open(joinpath(rundir,fid), "w")
+        writedlm(joinpath(rundir,fid), content, '\t')
     end
 
     info1 = [string(dt)*" "*string(Nₜ)*" 1" " "]
@@ -152,35 +150,35 @@ if frec
 
     # Surface elevation (temporal)
     fid::String = "eta_t" # File name
-    open(phipath*fid, "w")
+    open(joinpath(phipath,fid), "w")
     head = ["t [s]" "η [m]"]
-    writedlm(phipath*fid, [head; t ηₜ], '\t')
+    writedlm(joinpath(phipath,fid), [head; t ηₜ], '\t')
 
     # Surface elevation for OW3D wave file input (no time column)
     fid::String = "eta" # File name
-    open(OW3Dphipath*fid, "w")
-    writedlm(OW3Dphipath*fid, [head_o3d[1]; dt; ηₜ], '\t')
+    open(joinpath(OW3Dphipath,fid), "w")
+    writedlm(joinpath(OW3Dphipath,fid), [head_o3d[1]; dt; ηₜ], '\t')
     write_ow3d_inp(OW3Dphipath, fid, Ldom, dx, Nz, tₑ, Nₜ, max_kd, λ⁺)
 
     # Phase
     fid::String = "phi" # File name
-    open(phipath*fid, "w")
+    open(joinpath(phipath,fid), "w")
     head = ["f [Hz]" "ϕ [-]"]
-    writedlm(phipath*fid, [head; fⱼ ϕ], '\t')
+    writedlm(joinpath(phipath,fid), [head; fⱼ ϕ], '\t')
 
     # Horizontal velocity
     fid::String = "u" # File name
     head = ["t [s]" "u [m/s]"]
-    open(phipath*fid, "w")
-    writedlm(phipath*fid, [head; t u], '\t')
+    open(joinpath(phipath,fid), "w")
+    writedlm(joinpath(phipath,fid), [head; t u], '\t')
     # For OW3D wavemaker signal (flux)
-    open(OW3Dphipath*fid, "w")
-    writedlm(OW3Dphipath*fid, [head_o3d; info1; info2; t u], '\t')
+    open(joinpath(OW3Dphipath,fid), "w")
+    writedlm(joinpath(OW3Dphipath,fid), [head_o3d; info1; info2; t u], '\t')
 
     # Potential
     fid::String = "Potential" # File name
-    open(phipath*fid, "w")
-    writedlm(phipath*fid, [head_o3d; info1; info2; t Φ], '\t')
+    open(joinpath(phipath,fid), "w")
+    writedlm(joinpath(phipath,fid), [head_o3d; info1; info2; t Φ], '\t')
 
     # # Uniform horizontal velocity
     # fid::String = "U" # File name
@@ -219,8 +217,8 @@ end
 if fplot
     plt = plot(t, ηₜ, xlab = L"t~[s]", ylab = L"\eta~[m]", lab = L"η(t)", lw=1)
     display(plt)
-    if frec
-        savefig(phipath*"eta_t.svg")
+    if frec && (phi_id==0)
+        savefig(joinpath(phipath,"eta_t.svg"))
     end
 
     # plt = plot(t, ηₜᵈ, xlab = L"t~[s]", ylab = L"\eta (z=-d,t)~[m]", lab = L"η(t)", lw=1)
@@ -250,16 +248,26 @@ if fplot
     # plt = plot(t, P, xlab = L"t~[s]", ylab = L"\overline{P}~[W/m]", lab = L"η(t)", lw=2) 
     # display(plt)
 
-    freq, mag, _, dfₜ = one_side_asp(ηₜ,t) # Surface elevation spectrum
-    plt = plot(freq, mag, xlab = L"f~[Hz]", ylab = L"\tilde{\eta}~[m]", lab = "Non-linear spectrum", lw=1)
-    plot!(fⱼ, η̂, xlab = L"f~[Hz]", ylab = L"\tilde{\eta}~[m]", lab = "JONSWAP component amplitudes", lw=1)
+    freq, mag, ϕₜ, dfₜ,_ = one_side_asp(ηₜ,t) # Surface elevation spectrum
+    plt = plot(freq, mag, xlab = L"f~[Hz]", ylab = L"\tilde{\eta}~[m]", lab = "Non-linear spectrum", lw=2)
+    plot!(fⱼ, η̂, xlab = L"f~[Hz]", ylab = L"\tilde{\eta}~[m]", lab = "JONSWAP component amplitudes", lw=2)
     plot!(xlim=(0,fⱼ[end]))
     display(plt)
 
-    plt = plot(freq, mag.^2 /(2*dfₜ), xlab = L"f~[Hz]", ylab = "Magn", lab = "Non-linear variance spectrum", lw=1)
-    plot!(fⱼ, Sⱼ, xlab = L"f~[Hz]", ylab = L"S(f)~[m^2/Hz]", lab = "JONSWAP variance spectrum", lw=1)
+    plt_var = plot(freq, mag.^2 /(2*dfₜ), xlab = L"f~[Hz]", ylab = L"S(f)~[m^2/Hz]", lab = "Realisation", lw=2)
+    plot!(fⱼ, Sⱼ, lab = "JONSWAP", lw=2)
+    plot!(title="Non-linear variance spectrum")
     plot!(xlim=(0,fⱼ[end]))
+
+    plt_phase = plot(freq, unwrap(ϕₜ), xlab = L"f~[Hz]", ylab = L"\phi~[rad]", lab = "Realisation", lw=2)
+    plot!(fⱼ, unwrap(ϕ), lab = "JONSWAP", lw=2)
+    plot!(xlim=(0,fⱼ[end]))
+
+    plt = plot(plt_var, plt_phase, layout = @layout [a;b])
     display(plt)
+    if frec
+        savefig(joinpath(phipath,"spectral.svg"))
+    end
 
     # freq, mag, _, _ = one_side_asp(U,t)
     # plot(freq, mag, xlab = L"f~[Hz]", ylab = L"\tilde{U}~[m]", lab = "Spectrum U", lw=1)
