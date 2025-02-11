@@ -151,7 +151,7 @@ function rand_sea(fⱼ, Sⱼ, Tₑ, dt, Nₜ, phi_id, A_id, Ldom, d, Cr)
     return η̂, t, dt, ηₜ, u, u̇, ẇ, Φ, ηₜᵈ, ϕ, x, dx, Nₓ, ηₓ, z, dz, Nz, U
 end
 
-function wave_group(H₁,T₁,H₂,T₂,d,t, tᶜ)
+function wave_group(H₁,T₁,H₂,T₂,d,t,tᶜ,ϕ)
     ω₁ = 2π / T₁ 
     λ₁⁰ = g/(2*π) * T₁^2
     λ₁,_ = dispersion(T₁,d)
@@ -170,12 +170,12 @@ function wave_group(H₁,T₁,H₂,T₂,d,t, tᶜ)
     η̂₁ = H₁/2
     η̂₂ = H₂/2
 
-    η = (η̂₁+η̂₂) * cos.(2π/Tg *(t.-tᶜ)).*cos.(2π/Tw *(t.-tᶜ))
+    η = (η̂₁+η̂₂) * cos.(2π/Tg *(t.-tᶜ).+ϕ).*cos.(2π/Tw *(t.-tᶜ).+ϕ)
 
     return η, Tg, Tw
 end
 
-function stokes_sum(H₁,T₁,H₂,T₂,d,t,tᶜ)
+function stokes_sum(H₁,T₁,H₂,T₂,d,t,tᶜ,ϕ)
     ω₁ = 2π / T₁ 
     λ₁⁰ = g/(2*π) * T₁^2
     λ₁,_ = dispersion(T₁,d)
@@ -194,8 +194,8 @@ function stokes_sum(H₁,T₁,H₂,T₂,d,t,tᶜ)
     η̂₁ = H₁/2
     η̂₂ = H₂/2
 
-    θ₁ = -ω₁ * (t.+tᶜ)
-    θ₂ = -ω₂ * (t.+tᶜ)
+    θ₁ = -ω₁ * (t.+tᶜ).+ϕ
+    θ₂ = -ω₂ * (t.+tᶜ).+ϕ
 
     α₁ = coth(κ₁*d)
     α₂ = coth(κ₂*d)

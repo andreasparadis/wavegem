@@ -7,8 +7,8 @@ include("signal_processing.jl")
 include("jonswap.jl")
 include("peak_detect.jl")
 
-H₁, T₁::Float64 = 5.139948, 8.523
-H₂, T₂::Float64 = 5.139948, 5.081
+H₁, T₁::Float64 = 10, 9
+H₂, T₂::Float64 = 10, 10
 # H₁, T₁::Float64 = 1, 1
 # H₂, T₂::Float64 = 1, 1/sqrt(2)
 d, ρ, g::Float64 = 100.0, 1025.0, 9.81
@@ -30,8 +30,8 @@ Tw = 4π/(ω₁+ω₂)
 λg = 4π/(κ₁-κ₂)
 Tg = 4π/(ω₁-ω₂)
 
-Nₜ = 1000
-tₑ = 2*round(Tg)
+Nₜ = 2^10
+tₑ = round(Tg)
 dt = tₑ/(Nₜ-1)
 t = zeros(Float64,Nₜ)
 [t[i] = (i-1)*dt-Tg for i ∈ 1:Nₜ]
@@ -39,7 +39,7 @@ t = zeros(Float64,Nₜ)
 η̂₁ = H₁/2
 η̂₂ = H₂/2
 θ₁ = -ω₁ * t
-θ₂ = -ω₂ * t
+θ₂ = -ω₂ * t 
 
 α₁ = coth(κ₁*d)
 α₂ = coth(κ₂*d)
@@ -58,15 +58,22 @@ D = Dnum/Dden
 η = η₁ .+ η₂ .+ α₁*α₂/(2*g) * (C*cos.(θ₁-θ₂) - D*cos.(θ₁+θ₂))
 ηlin = (η̂₁+η̂₂) * cos.(2π/Tg *t).*cos.(2π/Tw *t)
 
-Nₓ = 1000
+Nₓ = 2^10
 x = collect(range(0,2*λ₁,Nₓ));
 ϕ₁ = κ₁*x
 η₁ˣ = zeros(Float64,Nₓ)
 
 η₁ˣ = η₁ˣ .+ η̂₁ * cos.(ϕ₁) .+ η̂₁^2 * κ₁/4 * cosh(κ₁*d)*(2+cosh(2κ₁*d))/sinh(κ₁*d)^3 * cos.(2*ϕ₁) 
 
+FR, MAG,_ = one_side_asp(η ,t)
+FRlin, MAGlin,_ = one_side_asp(ηlin ,t)
+
 display(plot(t, [η₁ η̂₁*cos.(θ₁)], lab=["Stokes" "Linear"]))
 display(plot(t, [η₂ η̂₂*cos.(θ₂)], lab=["Stokes" "Linear"]))
 display(plot(x, η, aspect_ratio=1))
 display(plot(t, [η ηlin]))
 display(plot(t, [ηlin (η̂₁+η̂₂)/2*cos.(2π/Tg *t) (η̂₁+η̂₂)/2*cos.(2π/Tw *t)]))
+display(plot(t, cos.(θ₁) .* cos.(θ₂)))
+plot(FR, MAG, lw=2, lab="Stokes", yscale=:log10)
+plot!(FRlin, MAGlin, lab="Linear", yscale=:log10)
+display(plot!(xlim=(0,0.5)))

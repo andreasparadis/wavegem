@@ -27,9 +27,9 @@ OFASTout::String = "/outD_"   # OpenFAST output file
 evfile::String = "event_1"      # Event file name
 #############################################################################################
 # Path definition 
-rpath = pdir*cdir*rdir  # Path to run directory
-phipath = rpath*phidir  # Path to phase shift corresponding directory
-Dpath = rpath*"/Decomposition"     # Path to Decomposition directory
+runstr = pdir*cdir*rdir  # Path to run directory
+phipath = runstr*phidir  # Path to phase shift corresponding directory
+Dpath = runstr*"/Decomposition"     # Path to Decomposition directory
 evdpath = Dpath*"/events"          # Path to events directory
 postOW3Dpath = phipath*"/postOW3D"*OW3Dprb    # Path to OW3D postprocessing directory
 postOFpath = phipath*"/postOFAST"     # Path to OpenFAST postprocessing directory
@@ -40,7 +40,7 @@ figOF = postOFpath*"/"          # Path to OpenFast event output folder
 # Flags
 full = Bool(0)  # Flag to plot and record full simulation
 fev = Bool(1)   # Flag to plot and record event simulations
-EEid = 0          # 0: Max Fairlead tension, 1: Max Pitch, 2: Max Wave, 3: Max CoM displacement
+CEid = 0        # 0: Max Fairlead tension, 1: Max Pitch, 2: Max Wave, 3: Max CoM displacement
 
 # Open and read files
 ## Full simulation
@@ -48,19 +48,18 @@ cont = parse_fxw_pf(OFoutpath, 0, 5)
 heads = readdlm(postOFpath*"/dataHdr")
 
 #############################################################################################
-fcut = 0.625;   dt = 0.01
+fcut = 0.625;   
 # Semi-submersible FOWT eigenfrequencies
 T₀ₛ¹ = 250.0000;    T₀ₛ² = 35.714107  
 T₀ₕ = 17.543772;    T₀ₚ = 27.026892
 
-Nₜ = size(cont)[1];     NoRows = size(cont)[2]
-t = zeros(Float64,Nₜ);      [t[i] = (i-1)*dt for i ∈ 1:Nₜ]
-
-Surge = cont[:,1];      Heave = cont[:,2];      Pitch = cont[:,3]
-Wave1Elev = cont[:,4];  Wave1Elev1 = cont[:,5]; FAIRTEN2 = cont[:,7]
+NoRows = size(cont)[2]
+t = cont[:,1];          Nₜ = length(t);         dt = t[2]-t[1]   
+Surge = cont[:,2];      Heave = cont[:,3];      Pitch = cont[:,4]
+Wave1Elev = cont[:,5];  Wave1Elev1 = cont[:,6]; FAIRTEN2 = cont[:,8]
 
 if full
-    for i ∈ 1:12
+    for i ∈ 2:NoRows
         plti = plot(xlab = "t [s]", title = "$(heads[i])", legend=:topleft, palette=[cb[11]])
         plot!(t, cont[:,i], lw=2, lab = "Full sim")
         display(plti)
@@ -109,16 +108,16 @@ w = r*(sin.(θ₀.+Pitch*π/180).-sin(θ₀))
 Fdisp = sqrt.((Surge .+ u).^2 .+ (Heave .+ w).^2)
 disp = sqrt.(Surge.^2 .+ Heave.^2)
 
-if EEid == 0
+if CEid == 0
     peak = findmax(FAIRTEN2)
-    figOF = figOF*"MaxFair"
-elseif EEid == 1
+    figOF = figOF*"MaxFair_7"
+elseif CEid == 1
     peak = findmax(Pitch)
     figOF = figOF*"MaxPitch"
-elseif EEid == 2
+elseif CEid == 2
     peak = findmax(Wave1Elev)
     figOF = figOF*"MaxWave"
-elseif EEid == 3 
+elseif CEid == 3 
     peak = findmax(disp)
     figOF = figOF*"MaxCoM"
 
@@ -128,14 +127,19 @@ elseif EEid == 3
     display(plt_disp)
 end
 
+MinPeakVal = 3*std(FAIRTEN2) .+ mean(FAIRTEN2)
+MinPeakDist = 0
+Aᵢ, tᵢ, i⁺, _ = peaks_max_ext(FAIRTEN2,t, MinPeakVal, MinPeakDist)
+peak = [tᵢ[7];i⁺[7]]
+
 if !isdir(figOF)
     mkdir(figOF)
 end
 
 # Truncated time vector for event plots
-trange = Int64(round(50/dt));  
-lb = peak[2]-3*trange;      ub = lb+4*trange 
-lb = Int(round(lb/10)*10);  ub = Int(round(ub/10)*10) 
+trange = Int(round(255.5/dt));  
+lb = Int(peak[2]-trange);      ub = Int(lb+2*trange)
+# lb = Int(round(lb/10)*10);  ub = Int(round(ub/10)*10) 
 tₑᵥ = t[lb:ub];     Lₑᵥ = length(tₑᵥ)
 
 # Plot full simulation response to selected extreme event
@@ -171,25 +175,70 @@ savefig(figOF*"/EE_resp.png")
 if fev
     # Event
     cont_ev = parse_fxw_pf(figOF*"/outD_event", 0, 5)
-    # Gaussian interpolation
-    cont_G = parse_fxw_pf(figOF*"/outD_etaG", 0, 5)
-    # Sum of EWGs
-    cont_EWGsum = parse_fxw_pf(figOF*"/outD_EWGsum", 0, 5)
-    # Focused Wave
-    cont_NW = parse_fxw_pf(figOF*"/outD_etaFCSD", 0, 5)
+    # FWG
+    cont_FWG = parse_fxw_pf(figOF*"/outD_FWG", 0, 5)
+    # DAM
+    cont_DAM = parse_fxw_pf(figOF*"/outD_DAM", 0, 5)
+    # 2AM
+    cont_2AM = parse_fxw_pf(figOF*"/outD_2AM", 0, 5)
+    # ALT_2AM
+    cont_ALT_2AM = parse_fxw_pf(figOF*"/outD_ALT_2AM", 0, 5)
+    # SFWG
+    # cont_SFWG = parse_fxw_pf(figOF*"/outD_SFWG", 0, 5)
+    # DWG
+    cont_DWG = parse_fxw_pf(figOF*"/outD_DWG", 0, 5)
+    # BEAT
+    cont_BEAT = parse_fxw_pf(figOF*"/outD_BEAT", 0, 5)
+    # NewWave
+    cont_NW = parse_fxw_pf(postOFpath*"/outD_NW", 0, 5)
 
-    for i ∈ 1:12
+    # time = range(tₑᵥ[1], tₑᵥ[end], length(cont_ev[:,1]))
+
+    for i ∈ 2:NoRows
         plti = plot(xlab = "t [s]", title = "$(heads[i])", legend=:topleft, palette=[cb[11];cb[4];cb[8];cb[1]])
         plot!(tₑᵥ, cont[lb:ub,i], lw=3, lab = "Full sim")
         plot!(tₑᵥ, cont_ev[:,i], lw=2, lab = "Event")
-        plot!(tₑᵥ, cont_G[:,i], line=:dot, lw=2, lab = L"G(t)")
-        plot!(tₑᵥ, cont_EWGsum[:,i], line=:dot, lw=2, lab = L"\sum g_n (t)")
+        # plot!(tₑᵥ, cont_FWG[:,i], line=:dot, lw=2, lab = L"G(t)")
+        # plot!(tₑᵥ, cont_SFWG[:,i], line=:dot, lw=2, lab = L"\sum g_n (t)")
         # plot!(tₑᵥ, cont_NW[:,i], line=:dot, lw=2, lab = "Focused Wave")
         display(plti)
         savefig(figOF*"/$(heads[i]).svg")
         savefig(figOF*"/$(heads[i]).png")
     end
 end
+
+m1 = maximum(cont[lb:ub,8]);        m2 = maximum(cont_ev[:,8]);         m3 = maximum(cont_FWG[:,8]);     m4 = maximum(cont_DAM[:,8]);
+m5 = maximum(cont_2AM[:,8]);    m6 = maximum(cont_ALT_2AM[:,8]);    m7 = maximum(cont_SFWG[:,8]);    m8 = maximum(cont_DWG[:,8]);
+m9 = maximum(cont_BEAT[:,8]);   m10 = maximum(cont_NW[:,8]);
+
+Rlbl = ("FWG","DAM","2AM","A2AM","SFWG","DWG","BEAT","NW")
+MT, Rid = findmax([m3;m4;m5;m6;m7;m8;m9;m10])
+Me = (MT-m1)/m1 * 100
+println("Sim. Max = $m1 [kN]")
+println("Recon. Max = $MT [kN], ($(Rlbl[Rid]))")
+println("Max Diff. = $Me %")
+
+pltFairA = plot(xlab = "t [s]", title = "$(heads[8])", legend=:topleft, palette=[cb[11];cb[4];cb[8];cb[1]])
+plot!(tₑᵥ, cont[lb:ub,8], lw=3, lab = "Full sim")
+plot!(tₑᵥ, cont_FWG[:,8], line=:dot, lw=2, lab = L"FWG")
+display(pltFairA)
+savefig(figOF*"/FairA.svg");  savefig(figOF*"/FairA.png")
+
+pltFairB = plot(xlab = "t [s]", title = "$(heads[7])", legend=:topleft, palette=[cb[11];cb[4];cb[8];cb[1]])
+plot!(tₑᵥ, cont[lb:ub,8], lw=3, lab = "Full sim")
+plot!(tₑᵥ, cont_DAM[:,8], line=:dot, lw=2, lab = L"DAM")
+plot!(tₑᵥ, cont_2AM[:,8], line=:dot, lw=2, lab = L"2AM")
+plot!(tₑᵥ, cont_ALT_2AM[:,8], line=:dot, lw=2, lab = L"A2AM")
+display(pltFairB)
+savefig(figOF*"/FairB.svg");  savefig(figOF*"/FairB.png")
+
+pltFairC = plot(xlab = "t [s]", title = "$(heads[7])", legend=:topleft, palette=[cb[11];cb[4];cb[8];cb[1]])
+plot!(tₑᵥ, cont[lb:ub,8], lw=3, lab = "Full sim")
+# plot!(tₑᵥ, cont_SFWG[:,8], line=:dot, lw=2, lab = L"SFWG")
+plot!(tₑᵥ, cont_DWG[:,8], line=:dot, lw=2, lab = L"DWG")
+plot!(tₑᵥ, cont_NW[:,8], line=:dot, lw=2, lab = "NewWave")
+display(pltFairC)
+savefig(figOF*"/FairC.svg");  savefig(figOF*"/FairC.png")
 
 # # Plot RAOs
 # FR = readdlm("library/SE/LAF/2/0/postOFAST/FREQ", skipstart=5, '\n');

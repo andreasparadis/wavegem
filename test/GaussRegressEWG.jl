@@ -1,60 +1,93 @@
 # Load necessary modules
 using Plots, LaTeXStrings, LinearAlgebra, DelimitedFiles
-using FFTW, DSP, LsqFit, Statistics,  Random
-using Distributions: Rayleigh, Uniform, Normal
-using CurveFit: curve_fit, linear_fit, Polynomial, expsum_fit, ExpFit
+using FFTW.AbstractFFTs, DSP, Statistics, BSplineKit
+using CurveFit: linear_fit
 import ColorSchemes.darkrainbow
 
 gr(fontfamily = "Computer Modern", titlefont = (11, "New Century Schoolbook Bold"))
 cb = darkrainbow
 
 # Include necessary scripts for functions
-include("text_process.jl")
-include("signal_processing.jl")
-include("peak_detect.jl")
-include("runge_kutta.jl")
-include("Gauss_Reg_t.jl")
-include("directories.jl")
-include("wave_theory.jl")
+include("text_process.jl"); include("signal_processing.jl")
+include("peak_detect.jl");  include("runge_kutta.jl")
+include("Gauss_Reg_t.jl");  include("directories.jl")
+include("wave_theory.jl");  include("jonswap.jl")
 
 #############################################################################################
-# Global variables
-Hₛⱼ = 7.306;   Tₚⱼ = 9.9
-# Hₛⱼ = 0.069;  Tₚⱼ = 1       
-ωₚⱼ = 2π/Tₚⱼ
+# INPUTS
+## Case directory
+# case_dir = joinpath("UCL","Waves","HS006TP1TR128","Random")
+case_dir = joinpath("SE","LCH","1")
+# case_dir = joinpath("JFM")
+# case_dir = joinpath("JFM","EV_2")
 
-# Semi-submersible FOWT eigenfrequencies
-T₀ₛ¹ = 250.0000;    T₀ₛ² = 35.714107  
-T₀ₕ = 17.543772;    T₀ₚ = 27.026892
+## Event directory
+# evdir = "EV5"
+# evdir = "Surge_EV4"
+evdir = "MaxFair_10"
+# evdir = "MaxCoM"
 
-g, d ::Float64 = 9.81, 100
+## Event filename of 1st order elevation
+fid_ev = "event_lin" # File name
 
+#############################################################################################
 # IO directories
-dir0::String = "library/SE/LCH/1/"
-fid0::String = dir0*"Decomposition/MaxWave/"
-fid_res::String = fid0*"GR_Results/"
-fid_ev::String = "event_lin" # File name
-
-# dir0::String = "/home/andreasp/WAVEGEM/library/JFM/"
-# fid0::String = dir0*"EWG/"                      
-# fid_res::String = fid0*"GR_Results/"
-# fid_ev::String = "2_1.txt" # File name    
-
-# dir0::String = "/home/andreasp/WAVEGEM/library/JFM/EV_2/"
-# fid0::String = dir0*"TGTs/"                      
-# fid_res::String = fid0*"GR_Results/"
-# fid_ev::String = "2_G1.txt" # File name   
+libpath = joinpath(pwd(),"library") # Project's library folder
+Parent = joinpath(libpath,case_dir)
+Decpath = joinpath(Parent,"Decomposition")
+DecFigs = joinpath(Decpath,"Figures")
+Eventpath = joinpath(Decpath,evdir)
+fid_res = joinpath(Eventpath,"GR_Results")  
+fid = joinpath(Eventpath,fid_ev) # Path to event file
 
 if !isdir(fid_res)
     mkdir(fid_res)
 end
+
+# Read simulation parameters from file
+fpar = joinpath(Decpath,"sim_pars")
+cont = parse_fxw(fpar, 1)  
+Hₛ, Tₚ, Tcut = cont[1], cont[2], cont[4]
+fcut = 1/Tcut
+#############################################################################################
+## Global variables
+g::Float64 = 9.81
+d::Float64 = 100
+# Hₛ, Tₚ, γ, fcut, d::Float64 = 0.054, 1.024, 3.3, 4.0, 1.0
+# Hₛ, Tₚ, fcut, d::Float64 = 0.069, 1.0, 4.0, 1.0  
+# Tcut = 1/fcut
+
+### TRUNCATION
+# false ≡ From 1st to last upcrossing, true ≡ Specific number of upcrossings prior and after highest peak
+ftrunc = false
+pNuc = 4;   aNuc = 2    # Relevant only for true
+
+### ENVELOPE LOW-PASS FILTER
+fcˡᵖ = 0.5*fcut # Cut-off frequency
+
+### ENVELOPE PEAK DETECTION
+std_fac = 2 # MinPeakVal - std coeff (1.25: >η̅, 2: >Hₛ/2, 0: all)
+MinPeakDist = 2*Tcut
+
+### RK SOLUTION PARAMETERS
+ϵ = 1e-5        # Accuracy
+Nτ = Int(1e4)   # Max iterations
+dτ = 1e-1       # Step of fictitious time
+Tlb = 0*Tcut    # Constraint - Lower bound 
+Tub = 250        # Constraint - Higher bound
+
+## Flags
+frec = true    # Write output files
+
+## Semi-submersible FOWT eigenfrequencies
+T₀ₛ¹, T₀ₛ², T₀ₕ, T₀ₚ = 250.0000, 35.714107, 17.543772, 27.026892   
+
 #############################################################################################
 # Pre-processing of wave event
 ## Read event surface elevation from file
-fid = fid0*fid_ev # Path to file
 cont = parse_fxw(fid, 0)
 
-tᵢ = round.((cont[:,1] .- cont[1,1])*100)/100 # x-coordinates vector
+tᵢ = (cont[:,1] .- cont[1,1]) # initial time vector
 ηᵢ = cont[:,2] # Surface elevation
 Lᵢ = length(tᵢ)
 
@@ -65,17 +98,24 @@ t = tᵢ .- tᵢ[iHP]
 
 # Truncate event based on number of up-crossings before and after highest peak
 iDᵤ = findall(diff(sign.(ηᵢ)) .== 2) # Up-crossings of surface elevation
+LiDᵤ = length(iDᵤ)
 
-## Select No of up-crossings before and after
-istart, iend = 0, 0
-cnt = iHP - minimum(abs.(iHP.-iDᵤ))
+istart, iend = Int(0), Int(0)
+cnt = Int(iHP - minimum(abs.(iHP.-iDᵤ)))
 
-for i ∈ 1:length(iDᵤ) 
-    if iDᵤ[i] == cnt
-        icnt = i
-        global istart = iDᵤ[icnt-14]
-        global iend = iDᵤ[icnt+5]
+if ftrunc
+    # Select based on No of up-crossings before and after
+    for i ∈ 1:LiDᵤ
+        if iDᵤ[i] == cnt
+            icnt = i
+            global istart = iDᵤ[icnt-pNuc]
+            global iend = iDᵤ[icnt+aNuc]
+        end
     end
+else
+    # From 1st to last upcrossing
+    global istart = iDᵤ[1]
+    global iend = iDᵤ[LiDᵤ]
 end
 
 ## Truncate event
@@ -85,30 +125,20 @@ M = length(t);      Øᴹ = zeros(Float64,M)
 dt = (t[end]-t[1])/(M-1)
 
 ## Event spectral analysis and peak frequency
-fr_η, mag_η, _ = one_side_asp(η, t)
-fₚ = fr_η[findmax(mag_η)[2]];   Tₚ = 1/fₚ;  ωₚ = 2π*fₚ
-
-# fcut = round(4*fₚ*10)/10 # Cut-off frequency (=4fₚ) [Hz]
-fcut = 0.625
-Tcut = 1/fcut
+fr_η, mag_η, ϕ_η,_ = one_side_asp(η, t)
+fᵉₚ = fr_η[findmax(mag_η)[2]]
 
 #############################################################################################
 # Hilbert transform and envelope of surface elevation
 𝓗 = hilbert(η);        uᵢ = abs.(𝓗)
-## Define filter cut-off frequency based on peak frequency of envelope
-# fr_uᵢ, mag_uᵢ = one_side_asp(uᵢ, t)
-# iEP = findmax(mag_uᵢ)[2]
-# fᴴcut = 2*fr_uᵢ[iEP]
-fᴴcut = fₚ
 
 # Low-pass filtering of envelope
-fₛˡᵖ = 64*fcut; Ntaps = 2^9+1   # Sampling frequency and No of taps of low-pass filter
-u = low_pass_filter(uᵢ,fcut,fₛˡᵖ,Ntaps)
+fₛˡᵖ = round(1/dt)
+Ntaps = nextpow(2,fₛˡᵖ/fcˡᵖ)   # No of taps
+u = low_pass_filter(uᵢ,fcˡᵖ,fₛˡᵖ,Ntaps)
 
-# Peak detection based on 2nd derivative of signal - Define A
-std_fac = 1.4 # Coefficient of standard deviation
-MinPeakVal, MinPeakDist = std_fac*std(η), 7*Tcut
-# MinPeakVal, MinPeakDist = 2*Hₛⱼ/4, 2*Tcut
+# Peak detection based on 2nd derivative of signal
+MinPeakVal = std_fac*std(η) 
 A, tᶜ, i⁺, uₜ, uₜₜ = peaks_max_ext(u,t, MinPeakVal, MinPeakDist)
 
 #############################################################################################
@@ -128,7 +158,8 @@ TD = (t[end]-t[1])
 #############################################################################################
 # Perform the least squares fitting
 ## Initial condition for L based on ∂ₜ²g(tᶜ) = ∂ₜ²u(tᶜ)
-N = length(tᶜ);     Øᴺ = zeros(Float64,N)
+N = length(tᶜ)     
+Øᴺ = zeros(Float64,N);  Ø = Array{Float64}(undef,0)
 T = Øᴺ
 
 for n ∈ 1:N
@@ -139,35 +170,31 @@ for n ∈ 1:N
         T[n] = sqrt.(2*A[n]./uₜₜ[i])
     end
 end
-# T = 2π/ωₚⱼ*ones(Float64,N)
-# tᶜ = tᶜ .+ [-0.5;-1]
-# tᶜ[4] = (tᶜ[4] + tᶜ[7])/2
-# T[4] = 0.0001
-# A[4] = (A[4]+A[7])/2
-# A[4] = 0
 
 # Definition of the ODE's dLₘ 
-ϵ = 1e-5
-Nτ = Int(1e5)
-dτ = 1000*ϵ 
 τ = zeros(Float64,Nτ)
-[τ[i] = (i-1)*dτ for i ∈ 1:Nτ]
+[τ[i] = (i-1)*dτ for i ∈ 2:Nτ]
 println("τₑ = ", τ[end])
 fun(τ,T) = dLdτ(τ,T, t, A, tᶜ,u, dt)
 
 # Solve optimization problem
-Tlb = 0*Tcut; Tub = 35
 Tₒₚₜ = RK4_nln_sys(τ,T,fun,Tlb,Tub,ϵ)
 
 # Optimal values
-Tₒ = Tₒₚₜ[1]
+Tₒ, Aₒ, tᶜₒ = [Ø[:] for _ = 1:3]
+i⁺ₒ = Array{Int64}(undef,0)
+pltCONV = plot(palette=:darkrainbow)
+
 for n ∈ 1:N
-    if Tₒ[n] < Tcut
-        A[n] = 0 
+    plot!(pltCONV, Tₒₚₜ[2][:,n], xlab = "Iteration",  ylab = L"T_o^i [s]", xscale=:log10, lab = "To[$(n)]", lw=2, legend=:outerbottom, legendcolumns=N)
+    if Tₒₚₜ[1][n] > Tcut
+        push!(Tₒ, Tₒₚₜ[1][n])
+        push!(Aₒ, A[n])
+        push!(tᶜₒ, tᶜ[n])
+        push!(i⁺ₒ,i⁺[n])
     end
 end
-Aₒ = A[:]
-tᶜₒ = tᶜ[:]
+
 lenT = length(Tₒ)
 
 #############################################################################################
@@ -177,7 +204,7 @@ G = gauss_fun(t, Aₒ, tᶜₒ, Tₒ)
 # Propagation of resulting WGs
 θ = angle.(𝓗)       # θ = ϕ-ωt
 eθ = exp.(1im*θ)     # exp(iθ) = exp(-iωt)*exp(iϕ)
-ηₜ = G.*eθ
+# ηₜ = G.*eθ
 
 ## Instantaneous frequency
 omH = zeros(Float64, M)
@@ -186,21 +213,29 @@ for i ∈ 2:M-1
     omH[i] = (θᵤ[i+1] - θᵤ[i-1]) / (t[i+1]-t[i-1])
 end
 
+frH, mgH, angH, _,_ = one_side_asp(omH,t)
+
 ωₒ = 2π ./ Tₒ
 ωᵢ = zeros(Float64, lenT)
 βᵢ = zeros(Float64, lenT)
+βₒ = zeros(Float64, lenT)
 
 for n ∈ 1:lenT
     eϕᵢ = eθ .* exp.(1im*ωₒ[n]*t)           # exp(iϕ) = exp(iθ)/exp(-iωt) = exp(iθ)*exp(iωt)
     ϕᵢ = real(-1im*log.(eϕᵢ))
     ϕᵢᵢ = unwrap(ϕᵢ)
     # ωᵢ[n] = (ϕᵢᵢ[end]-ϕᵢᵢ[1])/(t[end]-t[1])
-    fit = linear_fit(t,ϕᵢᵢ)
+    local fit = linear_fit(t,ϕᵢᵢ)
     ωᵢ[n] = fit[2]    # ϕ = ω⁺*t + β
     βᵢ[n] = fit[1]
+
+    nᵦ = Int(round((tᶜₒ[n]-t[1])/dt + 1))
+    βₒ[n] = ϕᵢᵢ[nᵦ]
+    # βₒ[n] = ωᵢ[n]*tᶜₒ[n]+βᵢ[n]
 end
 
 ω̃ = (ωᵢ.-ωₒ)[1]
+β̃ = (βᵢ.-βₒ)
 
 eωt = sum(exp.(-1im*ωₒ[n]*t) for n ∈ 1:lenT)    # exp(-iωt) = ∑exp(-iωₙt)
 # eωt = eωt ./ maximum(real(eωt))
@@ -217,18 +252,20 @@ f⁺ = ω⁺/2/π
 T⁺ = 1/f⁺
 
 eϕ̃ = exp.(1im*(ω⁺*t .+ β))
-eθ̃ = exp.(1im*(ω⁺*t .+ β)) .* exp.(1im*ωt)
+eθ̃ = exp.(1im*(ω̃*t .+ β̃[1]))
+# eθ̃ = exp.(1im*(ω⁺*t .+ β)) .* exp.(1im*ωt)
 # eθ̃ = exp.(1im*(ω⁺*t .+ β)) .* eωt
-# ηₜ = G.*real(eθ̃)
+ηₜ = G.*real(eθ̃)
 
 #############################################################################################
 # Normalization
-Ω = ω̃/ωₚⱼ;      ω̅⁺ = ω⁺/ωₚⱼ;      ω̅ᵢ = ωᵢ./ωₚⱼ
+ωₚ = 2π/Tₚ
+Ω = ω̃/ωₚ;      ω̅⁺ = ω⁺/ωₚ;      ω̅ᵢ = ωᵢ./ωₚ
 G̅ = G ./ maximum(u)
-t̅ = t ./ Tₚⱼ
-T̅z = Tz / Tₚⱼ    
-T̅IE = TIE ./ Tₚⱼ;   T̅DE = TDE ./ Tₚⱼ
-T̅ₒ = Tₒ ./ Tₚⱼ;     A̅ₒ = Aₒ ./ Hₛⱼ;     t̅ᶜ = tᶜₒ ./ Tₚⱼ
+t̅ = t ./ Tₚ
+T̅z = Tz / Tₚ    
+T̅IE = TIE ./ Tₚ;   T̅DE = TDE ./ Tₚ
+T̅ₒ = Tₒ ./ Tₚ;     A̅ₒ = Aₒ ./ Hₛ;     t̅ᶜ = tᶜₒ ./ Tₚ
 
 t̅ₘ = zeros(Float64, lenT)   # Peak times based on envelope intervals (from up-crossings)
 t̅ₘ[1] = -T̅IE[1]
@@ -241,60 +278,28 @@ end
 #############################################################################################
 # Propagation of individual EWGs
 TOT = zeros(ComplexF64, M)  # Total surface elevation
-Nₛ = Int(nextpow(2,M)/2)+1
+Nₛ = Int(nextpow(2,M)/2)
 SP_TOT = zeros(Float64, Nₛ) # Total spectrum of propagated Gaussian EWGs
 
+plt_gn = plot(palette=:darkrainbow)
 pltEWG = plot(palette=:darkrainbow)
 pltSPEC = plot(palette=:darkrainbow)
-pltCONV = plot(palette=:darkrainbow)
 
-for n ∈ 1:lenT
-    ξ = -β .+ [π/2; π; π; π/2] # .+ zeros(Float64, lenT)
-    # ξ = ωᵢ[n] * t .+ β
-     
-    # Gaussian EWG envelope
-    gₙ = elem_wg(t̅*Tₚⱼ, A̅ₒ*Hₛⱼ, t̅ᶜ*Tₚⱼ, T̅ₒ*Tₚⱼ, n)  # Non-dimensional
-    # gₙ = elem_wg(t, Aₒ, tₘ, Tₒ, n)
-    # gₙ = elem_wg(t, Aₒ, tᶜₒ, Tₒ, n)
-    # gₙ = elem_wg(t, Aₒ, zeros(Float64, lenT), Tₒ, n)
-
-    # Propagated EWG
-    WGT,_ = wave_group(1,T̅ₒ[n]*Tₚⱼ,1,2π/(Ω*ωₚⱼ),d,t̅*Tₚⱼ,0)
-    # WGT,_ = wave_group(1,T̅ₒ[n]*Tₚⱼ,1,2π/(Ω*ωₚⱼ),d,t̅*Tₚⱼ,0) 
-    # WGT,_ = wave_group(1,T̅ₒ[n]*Tₚⱼ,1,2π/ωₚⱼ,d,t̅*Tₚⱼ,0) 
-    # WGT,_ = stokes_sum(1,Tₒ[n],1,2π/ω̃,d,t,0)
-    ηₙ = gₙ .* WGT 
-    # ηₙ = gₙ .* exp.(-1im * Ω*ωₚⱼ * t̅*Tₚⱼ) #.* exp.(1im * β)
-    # ηₙ = gₙ .* exp.(-1im * ω̃ * t) #.* exp.(1im * β)
-    # ηₙ = gₙ .* exp.(-1im * ωₒ[n] * t) .* exp.(1im * β)
-    # ηₙ = gₙ .* exp.(1im*θ)
-    FR, MAG, ang, df,_ = one_side_asp(real(ηₙ),t̅*Tₚⱼ) 
-
+for n ∈ 1:lenT  
     # Propagated EWG - Focused WG
-    # ηⁱₙ = gₙ .* exp.(-1im * Ω*ωₚⱼ * t̅*Tₚⱼ) 
-    # ηⁱₙ = gₙ .* exp.(-1im * ω̃ * t) 
-    # ηⁱₙ = gₙ .* exp.(-1im * ωₒ[n] * t)
-    # ηⁱₙ = gₙ .* exp.(1im*θ)
-    # ηₙ, MAG, FR = fcsd_wg(ηⁱₙ, t̅*Tₚⱼ, A̅ₒ*Hₛⱼ, t̅ᶜ*Tₚⱼ, βᵢ[n], n)
-    # ηₙ, MAG, FR = fcsd_wg(ηⁱₙ, t̅*Tₚⱼ, A̅ₒ*Hₛⱼ, t̅ᶜ*Tₚⱼ, ξ[n], n)        
+    gₙ, ηᶜ, ηₙ, FR, MAG = recon(0, A̅ₒ[n], t̅ᶜ[n], T̅ₒ[n], β̃[n], Hₛ, Tₚ, Ω, t)
 
     TOT[:] = TOT[:] .+ ηₙ
     SP_TOT[:] = SP_TOT[:] .+ MAG
 
-    plot!(pltEWG, t̅*Tₚⱼ, real(ηₙ), xlab = "t [s]", ylab = "A [m]", lab = "g$(n)", lw=2, legend=:outerbottom, legendcolumns=lenT)
-    plot!(pltSPEC, FR, MAG, xlab = L"f [Hz]", ylab = L"A [m^2 s]", lab = "g$(n)", lw=2, legend=:outerbottom, legendcolumns=lenT)
-    plot!(pltCONV, Tₒₚₜ[2][:,n], xlab = "iteration",  ylab = L"T_o^i [s]", xscale=:log10, lab = "To[$(n)]", lw=2, legend=:outerbottom, legendcolumns=lenT)
+    plot!(plt_gn, t̅*Tₚ, gₙ, xlab = "t [s]", ylab = "A [m]", lab = "g$(n)", lw=2, legend=:outerbottom, legendcolumns=lenT)
+    plot!(pltEWG, t̅*Tₚ, real(ηₙ), xlab = "t [s]", ylab = "η [m]", lab = "η$(n)", lw=2, legend=:outerbottom, legendcolumns=lenT)
+    plot!(pltSPEC, FR, MAG, xlab = L"f [Hz]", ylab = L"A [m^2 s]", lab = "g$(n)", lw=2, legend=:outerbottom, legendcolumns=lenT)                            
 
-    for i ∈ 1:M
-        if abs(ηₙ[i]) < 1e-6
-            ηₙ[i] = 0
-        end
-    end                             
-
-    fid_EWG = "EWG_$n" # File name
-    open(fid_res*fid_EWG, "w")
-    # writedlm(fid_res*fid_EWG, [round.(t*1e6)./1e6 round.(gₙ*1e6)./1e6 round.(real(ηₙ*1e6))./1e6 round.(angle.(ηₙ)*1e6)./1e6], '\t')
-    writedlm(fid_res*fid_EWG, [round.(t*1e6)./1e6 round.(gₙ*1e6)./1e6 round.(WGT*1e6)./1e6 round.(ηₙ*1e6)./1e6], '\t')
+    fid_EWG = joinpath(fid_res,"EWG_$n") # File name
+    open(fid_EWG, "w")
+    # writedlm(fid_EWG, [round.(t*1e6)./1e6 round.(gₙ*1e6)./1e6 round.(real(ηₙ*1e6))./1e6 round.(angle.(ηₙ)*1e6)./1e6], '\t')
+    writedlm(fid_EWG, [round.(t*1e6)./1e6 round.(gₙ*1e6)./1e6 round.(ηₙ*1e6)./1e6], '\t')
 end
 
 #############################################################################################
@@ -330,18 +335,18 @@ plot!(t, real(ηₜ), lab=L"\eta_G(t)", lw=2, line=:dot)
 
 plt_eta1 = plot(xlab=L"t~[s]", ylab=L"\eta ~[m]", palette=[cb[11];cb[8]]) 
 plot!(t,η, lab = L"\eta(t)",lw=2)
-plot!(t̅*Tₚⱼ, real(TOT), lab = L"\sum EWGs", lw=2, line=:dot)
+plot!(t̅*Tₚ, real(TOT), lab = L"\sum EWGs", lw=2, line=:dot)
 
 plt_eta2 = plot(xlab=L"t~[s]", ylab=L"\eta ~[m]", palette=[cb[4];cb[8]]) 
 plot!(t, real(ηₜ), lab=L"\eta_G(t)", lw=2, line=:dot)
-plot!(t̅*Tₚⱼ, real(TOT), lab = L"\sum EWGs", lw=2)
+plot!(t̅*Tₚ, real(TOT), lab = L"\sum EWGs", lw=2)
 
 # Spectra of resulting signals
-plt_spec = plot(palette=[cb[11];cb[4];cb[8];cb[1]])
+plt_spec = plot(palette=[cb[11];cb[4];cb[8];cb[1]], legend=:topright)
 plot!(fr_η, mag_η, xlab = "f [Hz]", ylab = L"A [m^2 s]", lab = "Original", lw=2)
 freq, mag, _ = one_side_asp(real(ηₜ), t)
 plot!(freq, mag, xlab = "f [Hz]", ylab = L"A [m^2 s]", lab = L"\eta_{new}", lw=2)
-freq, mag, _ = one_side_asp(real(TOT), t̅*Tₚⱼ)
+freq, mag, _ = one_side_asp(real(TOT), t̅*Tₚ)
 plot!(freq, mag, xlab = "f [Hz]", ylab = L"A [m^2 s]", lab = "Sum", lw=2, line=:dot)
 plot!(freq, SP_TOT, xlab = "f [Hz]", ylab = L"A [m^2 s]", lab = "SP_TOT", lw=2, line=:dashdot)
 plot!(xlim=(0,fcut))
@@ -366,10 +371,13 @@ plot!(plt_ang, t̅, real(eθ̃), lab=L"Re\{e^{\theta_{cal} (t)}\}", lw=2)
 plot!(plt_ang, t̅, real(eϕ̃), lab=L"Re\{e^{\phi_{cal} (t)}\}", line=:dash)
 plot!(plt_ang, t̅, real(exp.(1im*ωt)), lab=L"Re\{e^{ωt_{cal} (t)}\}", line=:dash)
 
+plot!(pltCONV,xlim=(1e1,1e5))
+
 # Display plots
 display(plt_sigenv)
 display(plt_env)
 display(plt_G)
+display(plt_gn)
 display(pltEWG)
 display(pltSPEC)
 display(plt_eta0)
@@ -385,55 +393,69 @@ display(pltCONV)
 etaG = zeros(Float64, Lᵢ)
 etaG[istart:iend] = real(ηₜ)[:]
 plot(tᵢ, ηᵢ, lw=2, lab=L"\eta (t)")
-plot!(tᵢ,etaG, lw=2, lab=L"G (t)")
+# plot!(tᵢ,etaG, lw=2, lab=L"G (t)")
 
 EWGsum = zeros(Float64, Lᵢ)
 EWGsum[istart:iend] = real(TOT)[:]
-plot!(tᵢ,EWGsum, lw=2, lab=L"\sum g_i (t)")
+display(plot!(tᵢ,EWGsum, lw=2, lab=L"\sum g_i (t)"))
 
-ηTOT = fcsd_wg(freq, SP_TOT, t, Aₒ[1], 0, 0)
+ηTOT = fcsd_wg(freq, SP_TOT, t, Aₒ[1], 0, β̃[1])
 etaFCSD = zeros(Float64, Lᵢ)
 etaFCSD[istart:iend] = ηTOT[:]
-display(plot!(tᵢ, etaFCSD, lw=2, lab="Focused wave"))
+# display(plot!(tᵢ, etaFCSD, lw=2, lab="Focused wave"))
 
 # Save figures
-savefig(plt_G, fid_res*"env_Ginterp.svg");  savefig(plt_G, fid_res*"env_Ginterp.png")
-savefig(pltEWG, fid_res*"EWGs.svg");    savefig(pltEWG, fid_res*"EWGs.png")
-savefig(plt_eta0, fid_res*"new_sig_comp.svg");   savefig(plt_eta0, fid_res*"new_sig_comp.png")
-savefig(plt_pars, fid_res*"EWGpars.svg");   savefig(plt_pars, fid_res*"EWGpars.png")
+fid = joinpath(fid_res,"envelope")
+savefig(plt_sigenv, fid*".svg");  savefig(plt_sigenv, fid*".png")
+fid = joinpath(fid_res,"env_Ginterp")
+savefig(plt_G, fid*".svg");  savefig(plt_G, fid*".png")
+fid = joinpath(fid_res,"EWGs")
+savefig(pltEWG, fid*".svg");    savefig(pltEWG, fid*".png")
+fid = joinpath(fid_res,"new_sig_comp")
+savefig(plt_eta0, fid*".svg");   savefig(plt_eta0, fid*".png")
+fid = joinpath(fid_res,"EWGpars")
+savefig(plt_pars, fid*".svg");   savefig(plt_pars, fid*".png")
 
 #############################################################################################
-# Write results in text files
-t = round.(t*1e6)./1e6
-ηₜ = round.(ηₜ*1e6)./1e6
-TOT = round.(TOT*1e6)./1e6
-tᶜₒ = round.(tᶜₒ*1e6)./1e6
-Aₒ = round.(Aₒ*1e6)./1e6
-Tₒ = round.(Tₒ*1e6)./1e6
+if frec
+    # Write results in text files
+    t = round.(t*1e6)./1e6
+    ηₜ = round.(ηₜ*1e6)./1e6
+    TOT = round.(TOT*1e6)./1e6
+    tᶜₒ = round.(tᶜₒ*1e6)./1e6
+    Aₒ = round.(Aₒ*1e6)./1e6
+    Tₒ = round.(Tₒ*1e6)./1e6
 
-open(fid_res*"etaG", "w")
-# writedlm(fid_res*"etaG", [t real(ηₜ) angle.(ηₜ)], '\t')
-writedlm(fid_res*"etaG", [tᵢ etaG], '\t')
+    fid = joinpath(fid_res,"etaG")
+    open(fid, "w")
+    writedlm(fid, [tᵢ etaG], '\t')
+    # writedlm(fid, [t real(ηₜ) angle.(ηₜ)], '\t')
 
-open(fid_res*"EWGsum", "w")
-# writedlm(fid_res*"EWGsum", [t real(TOT) angle.(TOT)], '\t')
-writedlm(fid_res*"EWGsum", [tᵢ EWGsum], '\t')
+    fid = joinpath(fid_res,"EWGsum")
+    open(fid, "w")
+    writedlm(fid, [tᵢ EWGsum], '\t')
+    # writedlm(fid, [t real(TOT) angle.(TOT)], '\t')
 
-open(fid_res*"etaFCSD", "w")
-writedlm(fid_res*"etaFCSD", [tᵢ etaFCSD], '\t')
+    fid = joinpath(fid_res,"etaFCSD")
+    open(fid, "w")
+    writedlm(fid, [tᵢ etaFCSD], '\t')
 
-head = ["tᶜₒ [s]" "Tₒ [s]" "Aₒ [m]"]
-open(fid_res*"EWGpars", "w")
-writedlm(fid_res*"EWGpars", [head; tᶜₒ Tₒ Aₒ], '\t')    
+    fid = joinpath(fid_res,"EWGpars")
+    head = ["tᶜₒ [s]" "Tₒ [s]" "Aₒ [m]"]
+    open(fid, "w")
+    writedlm(fid, [head; tᶜₒ Tₒ Aₒ], '\t')    
 
-# head = ["t̅ᶜ [-]" "T̅ₒ [-]" "A̅ₒ [-]" "βᵢ [rad]" "ω̅ᵢ [-]" "T̅DE [-]" "t̅ₘ"]
-head = ["t̅ᶜ [-]" "T̅ₒ [-]" "A̅ₒ [-]" "βᵢ [rad]" "ω̅ᵢ [-]" "T̅ₛ" "T̅ₕ" "T̅ₚ"]
-open(fid_res*"EWG_norm_pars", "w")
-# row = round.([t̅ᶜ T̅ₒ A̅ₒ βᵢ ω̅ᵢ T̅DE t̅ₘ]*1e6)./1e6
-row = round.([t̅ᶜ T̅ₒ A̅ₒ βᵢ ω̅ᵢ Tₒ./T₀ₛ² Tₒ./T₀ₕ Tₒ./T₀ₚ]*1e6)./1e6
-writedlm(fid_res*"EWG_norm_pars", [head; row], '\t')
+    fid = joinpath(fid_res,"EWG_norm_pars")
+    # head = ["t̅ᶜ [-]" "T̅ₒ [-]" "A̅ₒ [-]" "βᵢ [rad]" "ω̅ᵢ [-]" "T̅DE [-]" "t̅ₘ"]
+    head = ["t̅ᶜ [-]" "T̅ₒ [-]" "A̅ₒ [-]" "β̃ [rad]" "ω̅ᵢ [-]" "T̅ₛ" "T̅ₕ" "T̅ₚ"]
+    open(fid, "w")
+    # row = round.([t̅ᶜ T̅ₒ A̅ₒ β̃ ω̅ᵢ T̅DE t̅ₘ]*1e6)./1e6
+    row = round.([t̅ᶜ T̅ₒ A̅ₒ β̃ ω̅ᵢ Tₒ./T₀ₛ² Tₒ./T₀ₕ Tₒ./T₀ₚ]*1e6)./1e6
+    writedlm(fid, [head; row], '\t')
 
-head = ["Hₛ [m]" "Tₚ [s]" "$std_fac*σₙ" "ηₘₐₓ [m]" "uₘₐₓ [m]" "t̅ₑᵥ [-]" "Ω [-]" "β [rad]" "ω̅⁺ [-]" "T̅z [-]"]
-open(fid_res*"G_pars", "w")
-row = round.([Hₛⱼ Tₚⱼ MinPeakVal ηHP maximum(u) t̅[end]-t̅[1] Ω β ω̅⁺ T̅z]*1e6)./1e6
-writedlm(fid_res*"G_pars", [head; row], '\t')
+    fid = joinpath(fid_res,"G_pars")
+    head = ["Hₛ [m]" "Tₚ [s]" "Ω [-]" "β [rad]" "$std_fac*σₙ" "ηₘₐₓ [m]" "uₘₐₓ [m]" "t̅ₑᵥ [-]" "ω̅⁺ [-]" "T̅z [-]"]
+    open(fid, "w")
+    row = round.([Hₛ Tₚ Ω β MinPeakVal ηHP maximum(u) t̅[end]-t̅[1] ω̅⁺ T̅z]*1e6)./1e6
+    writedlm(fid, [head; row], '\t')
+end

@@ -68,6 +68,9 @@ function RK4_nln_sys(x,y0,f,ylb,yub, ϵₒ)
 
         ϵ = maximum(ϵⱼ)
         i = i + 1
+        if mod(i,1000) == 0
+            println("Iteration: $i")
+        end
     end
 
     Y = y[1:i,:]

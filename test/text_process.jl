@@ -262,3 +262,37 @@ function read_ow3d_inp(fid)
 
     return Lx, Nx, Nz, Tₚ, Hₛ, γ, d, max_kd, g, ρw
 end
+
+function readMatData(file)
+
+    println(file)
+
+    # Load the MAT file (requires the MAT package)
+    mat_data = read(file)
+
+    # Get variable names and sort them
+    keys_list = collect(keys(mat_data))
+    len = length(keys_list) - 1
+
+    # Get the first and last variables in the file
+    dend = mat_data[keys_list[len + 1]]
+    d1 = mat_data[keys_list[1]]
+
+    # Dimensions of the first dataset
+    len_m = size(d1, 1)
+    len_n = size(d1, 2)
+
+    # Initialize the combined data array
+    d = zeros(Float64, len_m * (len - 1) + size(dend, 1), len_n)
+
+    # Combine the data
+    for i in 1:len
+        dTemp = mat_data[keys_list[i]]
+        d[len_m * (i - 1) + 1:len_m * i, :] .= dTemp
+    end
+
+    # Append the last dataset
+    d[len_m * (len - 1) + 1:end, :] .= dend
+
+    return d
+end

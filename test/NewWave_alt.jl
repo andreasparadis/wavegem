@@ -16,7 +16,7 @@ include("wave_theory.jl")
 Hₛ, Tₚ, Tᵢ, Tₑ, γ, g::Float64 = 5.3, 8.0, 1.6, 25, 1, 9.81
 x₀::Float64 = 0.0
 
-dt = 0.1;   tend = 100
+dt = 0.01;   tend = 100
 M = Int64(round(tend/dt))+1
 t = zeros(Float64,M)
 t₀ = tend/2
