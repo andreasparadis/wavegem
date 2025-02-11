@@ -101,9 +101,9 @@ function rand_sea(fⱼ, Sⱼ, Tₑ, dt, Nₜ, phi_id, A_id, Ldom, d, Cr, runstr)
     if phi_id == 0
         ϕ = angle.(amp) # ϕ ∈ [0,2π]
     else
-        cont = parse_fxw_pf(runstr*"/$(phi_id-1)/phi", 0, 1)
-        ϕ = cont[:,2] .- π/2
-        print("-$(phi_id)π/2 phase shift \n")
+        cont = parse_fxw_pf(joinpath(runstr,"$(phi_id-1)","phi"), 0, 1)
+        ϕ = cont[:,2] .+ π/2
+        print("$(phi_id)π/2 phase shift \n")
     end
 
     # Randomly distributed amplitude coefficient
@@ -129,7 +129,7 @@ function rand_sea(fⱼ, Sⱼ, Tₑ, dt, Nₜ, phi_id, A_id, Ldom, d, Cr, runstr)
     Φ̂ = g * Ĥ ./ ω
 
     for m ∈ 1:Nₛ
-        θ = -ω[m]*t .+ ϕ[m]
+        θ = ω[m]*t .+ ϕ[m]
         ϵ = k[m]*x .+ ϕ[m]
         csθ = cos.(θ)
         snθ = sin.(θ)

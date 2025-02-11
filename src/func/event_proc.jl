@@ -1,10 +1,7 @@
-function ev_identify(x, t, MinPeakVal, MinPeakDist, t_range, NP, shift, res_f)
-    # shift = 0, 1 or 2 == No shift, Start at t=0, Shift peak at t=0
+function ev_identify!(x, t, PeakVal, PeakPos, PeakId, t_range, NP, shift)
+    # shift = 0, 1 or 2 == Shift peak at t=0, Start at t=0, No shift
     Lₜ = length(t)
     Tₛ = (t[end]-t[1])/(Lₜ+1)
-
-    # Find peaks and sort them in descending order
-    PeakVal, PeakPos, PeakId = peaks_max_ext(x, t, MinPeakVal, MinPeakDist)
 
     PId = sortperm(PeakVal, rev=true)
     PeakVal = PeakVal[PId]
@@ -37,11 +34,62 @@ function ev_identify(x, t, MinPeakVal, MinPeakDist, t_range, NP, shift, res_f)
     for i ∈ 1:NoPeaks
         # Time vector of t_range around peak i
         if shift == 0
-            tₑᵥ[:, i] = (t[PeakId[i]-rng:PeakId[i]+rng])
+            tₑᵥ[:, i] = (t[PeakId[i]-rng:PeakId[i]+rng]) .- t[PeakId[i]]
         elseif shift == 1
             tₑᵥ[:, i] = (t[PeakId[i]-rng:PeakId[i]+rng]) .- t[PeakId[i]-rng]
         elseif shift == 2
+            tₑᵥ[:, i] = (t[PeakId[i]-rng:PeakId[i]+rng])
+        else
+            error("Pick a valid shift flag (0, 1 or 2) for the time vectors of events.")
+        end
+
+        events[:, i] = x[PeakId[i]-rng:PeakId[i]+rng]
+    end
+
+    return tₑᵥ, events, rng, PeakId, PeakPos, PeakVal, NoPeaks
+end
+
+function ev_identify_itp!(x, t, PeakVal, PeakPos, PeakId, t_range, NP, shift, res_f)
+    # shift = 0, 1 or 2 == Shift peak at t=0, Start at t=0, No shift
+    Lₜ = length(t)
+    Tₛ = (t[end]-t[1])/(Lₜ+1)
+
+    PId = sortperm(PeakVal, rev=true)
+    PeakVal = PeakVal[PId]
+    PeakPos = PeakPos[PId]
+    PeakId = PeakId[PId]
+
+    Peaks_len = length(PeakId)
+
+    # Identify and exctract events based on peaks
+    rng = round(Int, (t_range/2) / Tₛ + 1)
+
+    ## Move peaks with time range outside the time limits, at the end of the pecking order
+    NPout = 0 # No of peaks outside time limits
+    for i ∈ 2:Peaks_len-1
+        if PeakId[i] < rng+1 || PeakId[i]+rng > Lₜ
+            PeakId = [PeakId[1:i-1]; PeakId[i+1:end]; PeakId[i]]
+            PeakPos = [PeakPos[1:i-1]; PeakPos[i+1:end]; PeakPos[i]]
+            PeakVal = [PeakVal[1:i-1]; PeakVal[i+1:end]; PeakVal[i]]
+            NPout += 1 
+        end
+    end
+
+    ## Isolate events around peaks
+    NoPeaks = NP-NPout
+    println("$NoPeaks number of qualified events have been identified.")
+    
+    ∅ = zeros(2*rng+1,NoPeaks)
+    tₑᵥ, events = (∅[:,:] for _ = 1:2)
+
+    for i ∈ 1:NoPeaks
+        # Time vector of t_range around peak i
+        if shift == 0
             tₑᵥ[:, i] = (t[PeakId[i]-rng:PeakId[i]+rng]) .- t[PeakId[i]]
+        elseif shift == 1
+            tₑᵥ[:, i] = (t[PeakId[i]-rng:PeakId[i]+rng]) .- t[PeakId[i]-rng]
+        elseif shift == 2
+            tₑᵥ[:, i] = (t[PeakId[i]-rng:PeakId[i]+rng])
         else
             error("Pick a valid shift flag (0, 1 or 2) for the time vectors of events.")
         end
@@ -101,4 +149,44 @@ function sect_corr(t_rng, dt, Sects)
     sigR = std(R, dims=1)
 
     return rho, Ravg, sigR
+end
+
+function instant_freq(x,t)
+    # Hilbert transform
+    𝓗 = hilbert(x)     
+    u = abs.(𝓗)             # envelope
+    θ = unwrap(angle.(𝓗))   # phase angle
+
+    # Calculation of instantaneous frequency 
+    nₜ = length(t)
+    ωᴴ = zeros(Float64, nₜ)     # Instantaneous frequency
+    evsep = zeros(Float64, nₜ)  # Event separator line
+
+    for i ∈ 2:nₜ-1
+        ωᴴ[i] = (θ[i+1] - θ[i-1]) / (t[i+1]-t[i-1])
+        if ωᴴ[i] > 0 
+            evsep[i] = maximum(x)
+        else
+            evsep[i] = 0
+        end
+    end
+
+    # Statistics of instantaneous frequency
+    ω̅ᵢₙₛₜ = mean(ωᴴ)
+    idᵤₚ = findall(diff(sign.(ωᴴ)) .== 2) # Up-crossings of instantaneous frequency
+    Nᵤₚ = length(idᵤₚ)
+    ΔTᵉ = diff(t[idᵤₚ]);          ΔTᵉ = [t[idᵤₚ[1]]; ΔTᵉ]
+    tΔT = zeros(Float64,Nᵤₚ);       tΔT[1] = t[idᵤₚ[1]]/2
+    for i ∈ 2:Nᵤₚ
+        tΔT[i] = (t[idᵤₚ[i-1]] + t[idᵤₚ[i]])/2
+    end
+
+    evAmax = zeros(Float64,Nᵤₚ)  
+    evAmax[1] = maximum(x[1:idᵤₚ[1]])
+
+    for i ∈ 2:Nᵤₚ
+        evAmax[i] = maximum(x[idᵤₚ[i-1]:idᵤₚ[i]])
+    end
+
+    return ωᴴ, evsep, ω̅ᵢₙₛₜ, ΔTᵉ, tΔT, idᵤₚ, Nᵤₚ, evAmax
 end

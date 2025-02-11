@@ -16,13 +16,13 @@ function paths(pdir, run_id, phi_id, prb_id, flong)
     #   postOW3Dpath::String = Path to OW3D postprocessing folder
     #############################################################################################
     ## Definition of absolute parent directory paths containg necessary data
-    HOME::String = "/home/andreasp"                 # Path to home directory
-    HardDrive::String = "/run/media/data_storage"   # Path to secondary hard drive
-    ProjPath::String = pwd()                        # Project path
+    HOME::String = homedir()    # Path to home directory
+    ProjPath::String = pwd()    # Project path
+    HardDrive::String = joinpath("/run","media","data_storage")  # Path to secondary hard drive
 
-    libpath::String = ProjPath*"/library" # Path to project's library folder
-    OW3Dpath::String = HOME*"/OW3D_Out/WAVEGEM"   # Path to OW3D simulation output folder
-    OFASTpath::String = HardDrive*"/ONISILOS/OFAST"   # Path to OW3D simulation output folder
+    libpath::String = joinpath(ProjPath,"library")             # Path to project's library folder
+    OW3Dpath::String = joinpath(HOME,"OW3D_Out","WAVEGEM")     # Path to OW3D simulation output folder
+    OFASTpath::String = joinpath(HardDrive,"ONISILOS","OFAST") # Path to OW3D simulation output folder
 
     probes = ("x0", "x100", "x700", "x1000") # OW3D probes
 
@@ -32,18 +32,18 @@ function paths(pdir, run_id, phi_id, prb_id, flong)
     head_case = "# JS_$(Hₛ)m_$(Tₚ)s_ϕ$phi_id"
     OW3Dprb = probes[prb_id]
 
-    runstr::String = "/$(pdir)/$(case_id)/$(run_id)"
-    casedir::String = libpath * "/$(pdir)/$(case_id)/"
-    rundir::String = libpath * runstr
-    phipath::String = libpath * runstr * "/$(phi_id)/"
-    OW3Dcdir::String = OW3Dpath * "/$(pdir)/$(case_id)/"
-    OW3Drdir::String = OW3Dpath * runstr
-    OW3Dphipath::String = OW3Dpath * runstr * "/$(phi_id)/"
-    Decpath::String = libpath * "/$(pdir)/$(case_id)/$(run_id)/Decomposition/"
-    DecFigs::String = Decpath * "Figures/"
-    DecEvs::String = Decpath * "events/"
-    postOFpath::String = phipath * "postOFAST/"
-    postOW3Dpath::String = phipath * "postOW3D/$(OW3Dprb)/"
+    runstr::String = joinpath("$(pdir)","$(case_id)","$(run_id)")
+    casedir::String = joinpath(libpath,"$(pdir)","$(case_id)")
+    rundir::String = joinpath(libpath, runstr)
+    phipath::String = joinpath(libpath, runstr,"$(phi_id)")
+    OW3Dcdir::String = joinpath(OW3Dpath,"$(pdir)","$(case_id)")
+    OW3Drdir::String = joinpath(OW3Dpath, runstr)
+    OW3Dphipath::String = joinpath(OW3Dpath, runstr, "$(phi_id)")
+    Decpath::String = joinpath(libpath,"$(pdir)","$(case_id)","$(run_id)","Decomposition")
+    DecFigs::String = joinpath(Decpath,"Figures")
+    DecEvs::String = joinpath(Decpath,"events")
+    postOFpath::String = joinpath(phipath,"postOFAST")
+    postOW3Dpath::String = joinpath(phipath,"postOW3D","$(OW3Dprb)")
 
     # println("Paths:")
     # println("Processing the case: $case_id")

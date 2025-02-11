@@ -9,7 +9,7 @@ function parse_fxw(fid, hdl)
         content = readdlm(fid, '\n')
     else
         content = readdlm(fid, skipstart=hdl, '\n')
-        println("$hdl header lines have been skipped.")
+        println("$hdl header line(s) skipped in file $fid.")
     end
 
     NoRows = length(content)
@@ -267,7 +267,7 @@ function write_ow3d_inp(path, wavein, Ldom, dx, Nz, tₑ, Nₜ, max_kd, λ⁺)
     ρ, g, Ldom, d, Hₛ, Tₚ, γ, fcut = WAVEGEM.GlobInp0
     
     fid = "OceanWave3D.inp"
-    open(path*fid, "w")
+    open(joinpath(path,fid), "w")
     
     half_λ = round(λ⁺/10)*10 / 2
 
@@ -280,13 +280,13 @@ function write_ow3d_inp(path, wavein, Ldom, dx, Nz, tₑ, Nₜ, max_kd, λ⁺)
     OutTpl[2] = (0, 2, 0.5, '\t','#',dsc)
     # 3: Computational domain and resolution parameters
     dsc = " Lx -- Ly -- Lz -- Nx -- Ny -- Nz -- GridX -- GridY -- GridZ -- GhostGridX -- GhostGridY -- GhostGridZ"
-    OutTpl[3] = (Ldom, 1, d, Int(Ldom/dx+1), 1, Nz, 0, 0, 1, 1, 1, 1, '\t','#',dsc)
+    OutTpl[3] = (Ldom, 1, d, Int(round(Ldom/dx))+1, 1, Nz, 0, 0, 1, 1, 1, 1, '\t','#',dsc)
     # 4: Finite difference - Preconditioner
     dsc = " alpha -- beta -- gamma -- alphaprecond -- betaprecond -- gammaprecond"
     OutTpl[4] = (3, 3, 3, 1, 1, 1, '\t','#',dsc)
     # 5: Time parameters
     dsc = " Nsteps -- dt -- timeintegration scheme  -- CFL -- RK4 ExtrapolationON/OFF"
-    OutTpl[5] = (Nₜ-1, tₑ/(Nₜ-1), 1, 0, 0, 0, '\t','#',dsc)
+    OutTpl[5] = (Nₜ, tₑ/Nₜ, 1, 0, 0, 0, '\t','#',dsc)
     # 6: Global constants
     dsc = " gravitational acceleration -- water density"
     OutTpl[6] = (g, ρ, '\t','#',dsc)
@@ -303,13 +303,13 @@ function write_ow3d_inp(path, wavein, Ldom, dx, Nz, tₑ, Nₜ, max_kd, λ⁺)
     dsc = " xbeg -- xend -- xstride -- ybeg -- yend -- ystride -- tbeg -- tend -- tstride"
     OutTpl[10] = (1, 1, 1, 1, 1, 1, 1, Nₜ-1, 1, '\t','#',dsc)
     # 11: Probe 2 output
-    OutTpl[11] = (Int(100/dx+1), Int(100/dx+1), 1, 1, 1, 1, 1, Nₜ-1, 1, '\t','#',dsc)
+    OutTpl[11] = (Int(round(100/dx))+1, Int(round(100/dx))+1, 1, 1, 1, 1, 1, Nₜ-1, 1, '\t','#',dsc)
     # 12: Probe 3 output
-    OutTpl[12] = (Int(700/dx+1), Int(700/dx+1), 1, 1, 1, 1, 1, Nₜ-1, 1, '\t','#',dsc)
+    OutTpl[12] = (Int(round(700/dx))+1, Int(round(700/dx))+1, 1, 1, 1, 1, 1, Nₜ-1, 1, '\t','#',dsc)
     # 13: Probe 4 output
-    OutTpl[13] = (Int(1000/dx+1), Int(1000/dx+1), 1, 1, 1, 1, 1, Nₜ-1, 1, '\t','#',dsc)
+    OutTpl[13] = (Int(round(1000/dx))+1, Int(round(1000/dx))+1, 1, 1, 1, 1, 1, Nₜ-1, 1, '\t','#',dsc)
     # 14: Last timestep output
-    OutTpl[14] = (1, Int(Ldom/dx+1), 1, 1, 1, 1, Nₜ-1, Nₜ-1, 1, '\t','#',dsc)
+    OutTpl[14] = (1, Int(round(Ldom/dx))+1, 1, 1, 1, 1, Nₜ-1, Nₜ-1, 1, '\t','#',dsc)
     # 15: Mode, applied free-surface pressure
     dsc = " LinearONOFF -- PressureTermONOFF"
     OutTpl[15] = (1, 0, '\t','#',dsc)
@@ -337,6 +337,6 @@ function write_ow3d_inp(path, wavein, Ldom, dx, Nz, tₑ, Nₜ, max_kd, λ⁺)
     dsc = " Wave type id -- Tp -- Hs -- d -- max(kh) -- seed1 -- seed2 -- xgenwave -- ygenwave -- wave file"
     OutTpl[23] = (2, Tₚ, Hₛ, d, round(max_kd*10)/10, -1, -1, 0, 0, wavein, '\t','#',dsc)
 
-    writedlm(path*fid, OutTpl, " ")
+    writedlm(joinpath(path,fid), OutTpl, " ")
     return OutTpl
 end
