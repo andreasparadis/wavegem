@@ -88,7 +88,7 @@ MinPeakDist = WAVEGEM.Tᵢ
 
 ## Non-linear surface eleveation
 MinPeakVal = 2*std(A̅00) # Amplitude constraint (Hₛ/2)
-PeakVal, PeakPos, PeakId = peaks_max_ext(A̅00, tOG, MinPeakVal, MinPeakDist)
+PeakVal, PeakPos, PeakId = peaks_max_ext(A̅00, tOG, MinPeakVal, MinPeakDist,true)
 Nqp = length(PeakVal)
 println("Number of qualified peaks = $Nqp") 
 Nqe = length(findall(evAmax .> MinPeakVal)) 
@@ -96,7 +96,7 @@ println("Number of qualified events = $Nqe")
 
 ## Linear surface eleveation
 MinPeakVal = 2*std(Val_LNR) # Amplitude constraint (Hₛ/2)
-L_PeakVal, L_PeakPos, L_PeakId = peaks_max_ext(Val_LNR, tOG, MinPeakVal, MinPeakDist)
+L_PeakVal, L_PeakPos, L_PeakId = peaks_max_ext(Val_LNR, tOG, MinPeakVal, MinPeakDist,true)
 
 #############################################################################################
 ## PLOTS 
@@ -208,7 +208,12 @@ end
 
 #############################################################################################
 if frec
-    # Surface η (temporal)
+    # Surface η (temporal) - Nonlinear truncated signal
+    fid_elev::String = "eta_nln" # File name
+    open(joinpath(Decpath,fid_elev), "w")
+    writedlm(joinpath(Decpath,fid_elev), [tOG A̅00], '\t')
+
+    # Surface η (temporal) - 1st order component
     fid_elev::String = "eta_lin" # File name
     open(joinpath(Decpath,fid_elev), "w")
     writedlm(joinpath(Decpath,fid_elev), [tOG Val_LNR], '\t')
@@ -233,7 +238,7 @@ if frec
 end
 
 if !frec && !fplot
-    println("WARNING: Output recording and plots of Decomposition module have been suppressed (see Events module flag).")
+    println("WARNING: Output recording and plots of Decomposition module have been suppressed (see Events module).")
 end
 
 end

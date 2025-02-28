@@ -14,10 +14,12 @@ include("func/calc_globals.jl")
 #############################################################################################
 # Declaration of Global Variables
 ## Significant wave height [m], Peak period [s], peakedness [-], Cut-off frequency [Hz]
-Hₛ, Tₚ, γ::Float64 = 5.0, 8.0, 3.3  # JONSWAP parameters
+Hₛ, Tₚ, γ::Float64 = 8.0, 10.0, 3.3  # JONSWAP parameters
 fₛ, Tₑ::Float64 = 2^3, 2^5           # Sampling frequency and return period 
+# fₛ, Tₑ::Float64 = 10, 25           # Sampling frequency and return period (old simulations)
+
 pdir::String = "SE" # Parent directory in library folder ("SE", "WM", "rand_seas" etc.)
-run_id::Int8 = 15    # Run identifier in each case (1,2,3..)
+run_id::Int8 = 11    # Run identifier in each case (1,2,3..)
 phi_id::Int8 = 0    # Phase shift for decomposition: 0, 1, 2 , 3 == rand(), -π/2, -π, -3π/2
 prb_id::Int8 = 4    # ID No of probe from OW3D simulations
 
@@ -51,32 +53,29 @@ Dflags = (true, true)    # 1: Record run?, 2: Plot results?
 # Signal truncation
 tstart = round(1000/υ⁻)  # Depending on position of FOWT (x=1000m) and slowest wave [s]
 tend = tₑ-0.25                # Adjust accordingly [s]
-t_range = round(sqrt(2π/g * Ldom/2)) # Event length [s]
+# tend = 10799.9                # Adjust accordingly [s] (old simulations)
+# Peak correlation
+t_range = 20 # temporal range around peak [s]
 NP = 5  # Number of peaks to process (== No of events)
 
 DecSigs = ("eta0", "eta1", "eta2", "eta3") # Signal files for decomposition (~/Decomposition/)
+## ----------------------------------------------------------------------------------------##
 
 # -------------------------------------- Events ------------------------------------------- #
 # Module flags: true or false 
-Evflags = (true, true, true)    # 1: Record?, 2: Plot?, 3: Suppress Decomposition rec & plot?
-# Suppress record & plot for Decomposition module if it has already been applied
-fid_1st = joinpath(GlobPaths[1],"eta_lin")
-if Evflags[3] && !isfile(fid_1st)
-    Dflags = (false,false)
-end
-
+Evflags = (true, true)    # 1: Record?, 2: Plot?, 3: Suppress Decomposition rec & plot?
+CET::Int8 = 1  # Crit. event type = 1: Fairlead tension, 2: Pitch, 3: CoM disp, other: Wave
+evID::Int8 = 11 # Which event? (Sorted by descending amplitude)
 ## ----------------------------------------------------------------------------------------##
 
 # ---------------------------------- PostOpenFast ----------------------------------------- #
 # Module flags: true or false 
 POFflags = (true,false)     # 1: Full simulation?, 2: Partial (event) simulation?
-CEid = 0  # Critical event type = 0: Max Fair. tension, 1: Max Pitch, 2: Max Wave, 3: Max CoM 
-
+CEid::Int8 = 1  # Crit. event type = 1: Fairlead tension, 2: Pitch, 3: CoM disp, other: Wave
 ## ----------------------------------------------------------------------------------------##
 
-
 ## -------------------------------------- ERGEEs ------------------------------------------##
-evdir = "MaxFair_10"    # Event directory
+evdir = joinpath("MaxFair","EV11")    # Event directory
 ERGEEflags = (true, false)  # 1: Record run?, 2: Truncate signal?
 
 # Trunc.: false ≡ 1st to last upcross., true ≡ Specific upcross. prior and after highest peak
@@ -96,14 +95,43 @@ RK_Tub = Tₑ # Constraint - Higher bound
 ERGEEsInp = (fcˡᵖ, std_fac, MinPeakDist, RK_ϵ, RK_Nτ, RK_dτ, RK_Tlb, RK_Tub)
 ## ----------------------------------------------------------------------------------------##
 
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
-## FOWT eigenfrequencies
-whichFOWT = 2   # 1: OC4 semi-submersible, 2: Mikes
-FOWT = [0;0;0;0]    # T₀ₛ¹, T₀ₛ², T₀ₕ, T₀ₚ 
+## ----------------------------- FOWT eigenfrequencies ------------------------------------##
+whichFOWT = 1   # 1: OC4 semi-submersible, 2: Mikes
+FOWT = [0.0;0.0;0.0]    # T₀ₛ, T₀ₕ, T₀ₚ 
 if whichFOWT == 1
-    FOWT[:] = [250.0000; 35.714107; 17.543772; 27.026892] 
+    FOWT[:] = [113.763889; 17.353814; 26.253205] 
 elseif whichFOWT == 2
-    FOWT[:] = [93.079545; 26.944079; 17.064583; 26.944079]
+    FOWT[:] = [93.079545; 17.064583; 26.944079]
+end
+## ----------------------------------------------------------------------------------------##
+
+#############################################################################################
+################################# END OF INPUTS #############################################
+#############################################################################################
+# Identify the script that calls the WAVEGEM module
+stack = stacktrace()
+calling_file = ""
+# Iterate over the stack trace to find the first non-standard library call
+for frame in stack
+    if frame.func == :include && isfile(joinpath(pwd(),"src",basename(string(frame.file))))
+        global calling_file = basename(string(frame.file))
+        println("Called from file: $calling_file")
+        break
+    end
+end
+
+# Suppress Decomposition module outputs if already been applied (relevant for Events module)
+if calling_file == "Events.jl"
+    fid_1st = joinpath(GlobPaths[9],"eta_lin")
+    if !isfile(fid_1st)
+        Dflags = (true,true)
+    else
+        println("PROMPT: Do you want to suppress record & plot for Decomposition module? (y/n)")
+        uinp = readline()
+        if uinp == "y"
+            Dflags = (false,false)
+        end
+    end
 end
 
 #############################################################################################

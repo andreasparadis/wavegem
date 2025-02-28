@@ -20,7 +20,7 @@ include("func/wave_theory.jl");  include("func/jonswap.jl")
 #############################################################################################
 # Global variables
 ρ, g, _, d, _, _, _, fcut = WAVEGEM.GlobInp0
-T₀ₛ¹, T₀ₛ², T₀ₕ, T₀ₚ = WAVEGEM.FOWT[:]
+T₀ₛ, T₀ₕ, T₀ₚ = WAVEGEM.FOWT[:]
 
 #############################################################################################
 # IO directories
@@ -100,7 +100,7 @@ u = low_pass_filter(uᵢ,fcˡᵖ,fₛˡᵖ,Ntaps)
 
 # Peak detection based on 2nd derivative of signal
 MinPeakVal = std_fac*std(η) 
-A, tᶜ, i⁺, uₜ, uₜₜ = peaks_max_ext(u,t, MinPeakVal, MinPeakDist)
+A, tᶜ, i⁺, uₜ, uₜₜ = peaks_max_ext(u,t, MinPeakVal, MinPeakDist,true)
 
 #############################################################################################
 # Up- and down-crossings
@@ -411,7 +411,7 @@ if frec
     head = ["t̅ᶜ [-]" "T̅ₒ [-]" "A̅ₒ [-]" "β̃ [rad]" "ω̅ᵢ [-]" "T̅ₛ" "T̅ₕ" "T̅ₚ"]
     open(fid, "w")
     # row = round.([t̅ᶜ T̅ₒ A̅ₒ β̃ ω̅ᵢ T̅DE t̅ₘ]*1e6)./1e6
-    row = round.([t̅ᶜ T̅ₒ A̅ₒ β̃ ω̅ᵢ Tₒ./T₀ₛ² Tₒ./T₀ₕ Tₒ./T₀ₚ]*1e6)./1e6
+    row = round.([t̅ᶜ T̅ₒ A̅ₒ β̃ ω̅ᵢ Tₒ./T₀ₛ Tₒ./T₀ₕ Tₒ./T₀ₚ]*1e6)./1e6
     writedlm(fid, [head; row], '\t')
 
     fid = joinpath(fid_res,"G_pars")

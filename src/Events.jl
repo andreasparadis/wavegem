@@ -19,18 +19,20 @@ include("func/peak_detect.jl")
 include("func/directories.jl")
 include("func/wave_theory.jl")
 include("func/event_proc.jl")
+include("func/text_process.jl")
 
 #############################################################################################
 # Import Global Variables & Module specific inputs
 ρ, g, Ldom, d, _, _, γ, fcut = WAVEGEM.GlobInp0
 pdir, run_id, phi_id, prb_id = WAVEGEM.GlobInp1
 case_id, _, rundir = WAVEGEM.GlobPaths[2:4]
-Decpath, _, DecFigs = WAVEGEM.GlobPaths[9:11]
-OFASTpath = WAVEGEM.GlobPaths[end]
-frec, fplot = WAVEGEM.Evflags[1:2]
+Decpath, _, DecFigs, postOFpath, _, OFASTpath = WAVEGEM.GlobPaths[9:end]
+frec, fplot = WAVEGEM.Evflags
+CET, evID = WAVEGEM.CET, WAVEGEM.evID
 Wave = WAVEGEM.Wave
 
 A̅00, Val_LNR = Decomposition.A̅00, Decomposition.Val_LNR
+PeakId = Decomposition.PeakId
 tOG, nₜ, dt = Decomposition.tOG, Decomposition.nₜ, Decomposition.dt
 sig_comps, sig_recon = Decomposition.sig_comps, Decomposition.sig_recon
 ωᴴ, idᵤₚ = Decomposition.ωᴴ, Decomposition.idᵤₚ
@@ -38,17 +40,33 @@ T₂₋, T₂₊ = Decomposition.T₂₋, Decomposition.T₂₊
 
 #############################################################################################
 # Make directories
-evID = 1
-evdir = joinpath(Decpath,"EV$evID")
+if CET == 1        # Fairlead tension critical event
+    case_str = "MaxFair"
+elseif CET == 2    # Pitch critical event
+    case_str = "MaxPitch"
+elseif CET == 3    # CoM extreme displacement event 
+    case_str = "MaxCoM"
+else                # Response to extreme wave event
+    case_str = "MaxWave"
+end
+
+if CET ∈ [1;2;3]
+    f_tinst = joinpath(postOFpath,case_str*"_tinsts")   # OpenFAST events timestamps
+    cont = parse_fxw(f_tinst, 0)                        # Read timestamps file
+    tinst = cont[:,1]                                   # Vector of time instances
+end
+
+evdir = joinpath(Decpath,case_str,"EV$evID") # Output directory
+make_dirs(2, joinpath(Decpath,case_str), evdir)
 
 #############################################################################################
 # Event Isolation & Analysis
-if !isdir(evdir)
-    mkdir(evdir)
-end
-
 ## Event limits
-lb = idᵤₚ[evID]
+if CET ∈ [1;2;3]
+    lb = Int(tinst[evID]/dt+1)
+else
+    lb = PeakId[evID]
+end
 ub = lb+1
 
 while sign(ωᴴ[lb]) == sign(ωᴴ[lb-1]) && lb > 2
@@ -117,22 +135,21 @@ if fplot
     # plot!(legendcolumns=3)
 
     # 2: Reconstructed signal against the original
-    plt_recon = plot(tpart, A̅00[lb:ub], line =:solid, label = "Non-linear",palette=[cb[8];cb[11]])
-    plot!(tpart, sig_recon[lb:ub], line =:dash, color =:red, label = L"\sum components")
-    plot!(title = "Comparison: Original vs Reconstructed Signal", xlab = "t [sec]", ylab = "η [m]")
+    plt_recon = plot(tpart, A̅00[lb:ub], lw=2, label = "Non-linear",palette=[cb[8];cb[11]])
+    plot!(tpart, sig_recon[lb:ub], line =:dash, lw=2, label = L"\sum components")
+    plot!(title = "Original vs Reconstructed Signal", xlab = "t [sec]", ylab = "η [m]")
 
     # 3: Interpolated event against original event
-    plt_itp = plot(tEV[1:Lₚ], real(EV[1:Lₚ]), line = :solid, lw = 1, lab = "Interpolation", palette=[cb[8];cb[11]])
-    plot!(twiny(), tpart, A̅00[lb:ub], line =:dash, color =:red, lw = 1, ylab = "η [m]", lab = "Non-linear")
-    plot!(title = "Event at Highest Peak: Original vs Interpolated", xlab = "t [sec]")
-
+    plt_itp = plot(tEV[1:Lₚ], real(EV[1:Lₚ]), lw = 2, ylab = "η [m]", lab = "Interpolation",  palette=[cb[8]], legend=:topright)
+    plot!(twiny(), tpart, Aₑₑ¹, line =:dash, lw = 2, lab = L"1_{st}", palette=[cb[11]], legend=:bottomright)
+    plot!(title = "Event - Linear SE", xlab = "t [sec]") 
+    
     # 4: Highlight event position in full signal
-    # c = PeakPos[evID]; w = 50
-    c = tOG[lb+1000]; w = 100
-    h = maximum(A̅00)
-    plt_maxev = plot(tOG, A̅00, xlab = "t [sec]", ylab = "η [m]",  label = "Non-linear", palette=[cb[8];cb[11]])
-    plot!(Shape([c-w,c-w,c+w,c+w],[-h,h,h,-h]), color=:red, opacity=0.3, label = "Event")
-    plot!(xlim=(c-10*w, c+10*w))
+    w = 5*(ub-lb)*dt
+    h = maximum(A̅00[lb:ub])
+    plt_maxev = plot(tOG, A̅00, xlab = "t [sec]", ylab = "η [m]",  label =:false, palette=[cb[8];cb[11]])
+    plot!(Shape([tOG[lb],tOG[lb],tOG[ub],tOG[ub]],[-h,h,h,-h]), color=:red, opacity=0.3, label = "Event")
+    plot!(xlim=(tOG[lb]-w, tOG[ub]+w))
 
     # 5: Selected event and event limits based on instantaneous frequency
     rng = Int(round(10/dt))
@@ -146,12 +163,21 @@ if fplot
     plot!([tOG[ub];tOG[ub]],[minimum(ωᴴ[lb-rng:ub+rng]);maximum(ωᴴ[lb-rng:ub+rng])], lab="ub", ls=:dash, lw=2)
 
     # 6: 2nd- component spectrum
-    _, mag_2nd,_ = one_side_asp(sig_comps[lb:ub,2], tₑₑ)
-    plt_2ndm = plot(xlab = L"f~[Hz]", ylab = L"S(f)~[m]", lw=2, xlim=(0,fcut), palette=[cb[8];cb[11];cb[5];cb[2]])
-    plot!(fr_ev, mag_2nd, lw=2, lab=L"Event~2_{nd}^{-}")
-    plot!([1/T₂₋; 1/T₂₋], [0; maximum(mag_2nd)], line=:dash, lw=2, lab=L"f_2^{-}")
-    plot!([1/T₂₊; 1/T₂₊], [0; maximum(mag_2nd)], line=:dash,  lw=2, lab=L"f_2^{-}")
+    plt_2ndm_a = plot(xlab = "t [sec]", ylab = "η [m]", palette=[cb[5]], title=L"2_{nd}^{-}"*" component")
+    plot!(tpart, sig_comps[lb:ub,2], line =:dot, lw = 2, lab=:false)
 
+    _, mag_2nd,phi_2nd,_ = one_side_asp(sig_comps[lb:ub,2], tₑₑ)
+    plt_2ndm_b = plot(xlab = "f [Hz]", ylab = L"S(f)~[m]", lw=2, xlim=(0,fcut), palette=[cb[8];cb[11];cb[5];cb[2]])
+    plot!(fr_ev[2:end], mag_2nd[2:end], lw=2, lab=:false, xscale=:log10, xlim=(fr_ev[2],1))
+    plot!([1/T₂₋; 1/T₂₋], [1e-12; maximum(mag_2nd)], line=:dot, lw=1, lab=L"f_2^{-}")
+    plot!([1/T₂₊; 1/T₂₊], [1e-12; maximum(mag_2nd)], line=:dot, lw=1, lab=L"f_2^{-}")
+
+    plt_2ndm_c = plot(xlab = "f [Hz]", ylab = L"\phi~[rad]", palette=[cb[8]])
+    plot!(fr_ev[2:end], phi_2nd[2:end], lw=2, lab=:false, xscale=:log10)
+    plot!(xlim=(fr_ev[2],1))
+
+    plt_2ndm = plot(plt_2ndm_a, plt_2ndm_b, plt_2ndm_c, layout = @layout [a; b c])
+    
     display(plt1)
     display(plt_recon)
     display(plt_itp)
