@@ -132,7 +132,8 @@ function maxima(x,t)
     return t⁺, x⁺, ẋ, ẍ, i⁺
 end
 
-function peaks_max_ext(x,t, MinPeakVal, MinPeakDist)
+function peaks_max_ext(x,t, MinPeakVal, MinPeakDist, sort)
+    # x: signal ,t: time, MinPeakVal, MinPeakDist, sort: true/false - sort peaks by amplitude
     # Initialize variables
     m = length(t)
     𝚶⃗ₘ = zeros(Float64,m);    
@@ -172,14 +173,31 @@ function peaks_max_ext(x,t, MinPeakVal, MinPeakDist)
     n = length(ids)
     tₑ, xₑ = Ø, Ø
     ID = Array{Int64}(undef,0)
+
+    if sort
+        # Sort in descending order based on amplitude
+        for i in 1:n
+            for j in 1:n-i
+                if PVal[j] < PVal[j+1]
+                    PVal[j], PVal[j+1] = PVal[j+1], PVal[j]
+                    PPos[j], PPos[j+1] = PPos[j+1], PPos[j]
+                    PId[j], PId[j+1] = PId[j+1], PId[j]
+                end
+            end
+        end
+    end
+
     tₑ, xₑ, ID = [PPos[1]], [PVal[1]], [PId[1]]
 
     # MinPeakDist condition
+    # cnt = 1
     for i ∈ 2:n
-        if PPos[i]-PPos[i-1] > MinPeakDist
+        PeakDist = abs.(tₑ .- PPos[i])
+        if minimum(PeakDist) > MinPeakDist
             push!(ID, PId[i])
             push!(tₑ, PPos[i])
             push!(xₑ, PVal[i])
+            # cnt = i
         end
     end
 
