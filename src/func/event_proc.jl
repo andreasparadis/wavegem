@@ -190,3 +190,18 @@ function instant_freq(x,t)
 
     return ωᴴ, evsep, ω̅ᵢₙₛₜ, ΔTᵉ, tΔT, idᵤₚ, Nᵤₚ, evAmax
 end
+
+function separate_duplicates(arr)
+    counts = Dict{Float64, Int}()
+
+    # Count occurrences of each element
+    for value in arr
+        counts[value] = get(counts, value, 0) + 1
+    end
+
+    # Separate values into duplicates and non-duplicates
+    duplicates = [key for (key, count) in counts if count > 1]
+    non_duplicates = [key for (key, count) in counts if count == 1]
+
+    return duplicates, non_duplicates
+end

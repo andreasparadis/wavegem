@@ -75,7 +75,8 @@ function make_dirs(levels, folders...)
         elseif !isdir(gchild)
             mkdir(gchild)
         else
-            println("WARNING: Folder already exists. Contained files may be overwritten.")
+            println("WARNING: Folder '$(gchild)' already exists.")
+            println("WARNING: Contained files may be overwritten.")
             println("WARNING: Are you sure you want to proceed? (y/n)")
             uinp = readline()
             if uinp == "n"
@@ -92,7 +93,8 @@ function make_dirs(levels, folders...)
         elseif !isdir(child)
             mkdir(child)
         else
-            println("WARNING: Folder already exists. Contained files may be overwritten.")
+            println("WARNING: Folder '$(child)' already exists.")
+            println("WARNING: Contained files may be overwritten.")
             println("WARNING: Are you sure you want to proceed? (y/n)")
             uinp = readline()
             if uinp == "n"
@@ -105,7 +107,8 @@ function make_dirs(levels, folders...)
         if !isdir(parent)
             mkdir(parent)
         else
-            println("WARNING: Folder already exists. Contained files may be overwritten.")
+            println("WARNING: Folder '$(parent)' already exists.")
+            println("WARNING: Contained files may be overwritten.")
             println("WARNING: Are you sure you want to proceed? (y/n)")
             uinp = readline()
             if uinp == "n"
