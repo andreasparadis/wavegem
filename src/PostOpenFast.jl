@@ -10,6 +10,7 @@ include("func/signal_processing.jl")
 include("func/text_process.jl")
 include("func/peak_detect.jl")
 include("func/jonswap.jl")
+include("func/event_proc.jl")
 
 import ColorSchemes.darkrainbow
 gr(fontfamily = "Computer Modern", titlefont = (11, "New Century Schoolbook Bold"))
@@ -21,7 +22,7 @@ runstr, case_id, casedir, rundir, phipath, OW3Dcdir, OW3Drdir, OW3Dphipath,
             Decpath, DecEvs, DecFigs, postOFpath, postOW3Dpath, OFASTpath = WAVEGEM.GlobPaths
 Wave = WAVEGEM.Wave
 full, fev = WAVEGEM.POFflags
-CEid = WAVEGEM.CEid
+CET, evID = WAVEGEM.CET, WAVEGEM.evID
 T₀ₛ, T₀ₕ, T₀ₚ = WAVEGEM.FOWT[:]
 
 #############################################################################################
@@ -48,23 +49,21 @@ NoRows = size(cont)[2]
 
 t, Surge, Heave, Pitch, Wave1Elev, Wave1Elev1, FAIRTEN1, FAIRTEN2, 
 HydroFxi, HydroFzi, HydroMyi, PtfmTAxt, PtfmTAzt = [cont[:,i] for i = 1:NoRows]
+aCoM = sqrt.(PtfmTAxt.^2 .+ PtfmTAzt.^2)  # CoM acceleration
 Nₜ = length(t)       
 dt = t[2]-t[1]
-
-
-aCoM = sqrt.(PtfmTAxt.^2 .+ PtfmTAzt.^2)  # CoM acceleration
 
 #############################################################################################
 # Critical Event statistics & selection
 RespVar = zeros(Float64,Nₜ) # The response variable to be analysed
 
-if CEid == 1        # Fairlead tension critical event
+if CET == 1        # Fairlead tension critical event
     RespVar[:] = FAIRTEN2[:]
     case_str = "MaxFair"
-elseif CEid == 2    # Pitch critical event
+elseif CET == 2    # Pitch critical event
     RespVar[:] = Pitch[:]
     case_str = "MaxPitch"
-elseif CEid == 3    # CoM extreme displacement event 
+elseif CET == 3    # CoM extreme displacement event 
     RespVar[:] = disp[:]
     case_str = "MaxCoM"
 else                # Response to extreme wave event
@@ -77,24 +76,66 @@ if !isdir(figOF)
     mkdir(figOF)
 end
 
-## Find and sort maxima in the selected response time history
-MinPeakVal = 3*std(RespVar) .+ mean(RespVar)    # Amplitude threshold (default=3*std)
+# Find all maxima above a given threshold of the selected response time history
+PosPeaks, _ = peaks_max_ext(RespVar,t, RespVar[1], 0, false)
+
+## Find and sort extreme maxima in the selected response time history
+MinPeakVal = 5*std(RespVar) .+ mean(RespVar)    # Amplitude threshold (default=3*std)
 Aᵢ, tᵢ, i⁺, _ = peaks_max_ext(RespVar,t, MinPeakVal, 0, true)
 Nce = length(Aᵢ)        # Number of peaks above threshold
 
+# Remove duplicate events
+## Instantaneous frequency
+ωᴴ,_ = instant_freq(RespVar,t)
+## Start point of corresponding event
+lbs = Array{Int64}(undef,0)
+for i ∈ 1:Nce
+    ilb = i⁺[i]
+    while sign(ωᴴ[ilb]) == sign(ωᴴ[ilb-1]) && ilb > 2
+        ilb = ilb - 1
+    end
+    push!(lbs,ilb)
+end
+duplicates, non_duplicates = separate_duplicates(lbs)
+println("Duplicate events start time= ", t[Int.(duplicates)])
+
 ### Store time instances of maxima
 f_tinst = joinpath(postOFpath,case_str*"_tinsts")
-if !isfile(f_tinst)
-    open(f_tinst, "w")
-    writedlm(f_tinst, [tᵢ Aᵢ], '\t')
+open(f_tinst, "w")
+writedlm(f_tinst, [tᵢ Aᵢ], '\t')
+
+
+# Time histories
+if fev
+    # Event
+    cont_ev = parse_fxw(figOF*"/outD_EV$evID", 5)
+    # FWG
+    cont_FWG = parse_fxw(figOF*"/outD_EV$(evID)_ReFoGWs", 5)
+    # # DAM
+    # cont_DAM = parse_fxw_pf(figOF*"/outD_DAM", 0, 5)
+    # # 2AM
+    # cont_2AM = parse_fxw_pf(figOF*"/outD_2AM", 0, 5)
+    # # ALT_2AM
+    # cont_ALT_2AM = parse_fxw_pf(figOF*"/outD_ALT_2AM", 0, 5)
+    # # SFWG
+    # # cont_SFWG = parse_fxw_pf(figOF*"/outD_SFWG", 0, 5)
+    # # DWG
+    # cont_DWG = parse_fxw_pf(figOF*"/outD_DWG", 0, 5)
+    # # BEAT
+    # cont_BEAT = parse_fxw_pf(figOF*"/outD_BEAT", 0, 5)
+    # # NewWave
+    # cont_NW = parse_fxw_pf(postOFpath*"/outD_NW", 0, 5)
+    trange = Int(round(cont_ev[end,1]/2/dt))
+    imax = findmax(cont_ev[:,8])[2] # Position of max fairten  
+else
+    trange = Int(round(2^7/dt))
+    imax = 0
 end
 
-peak = [tᵢ[2];i⁺[2]]    # Time and interval of event peak
-
-# Truncated time vector for event plots
-trange = Int(round(255.5/dt));  
-lb = Int(peak[2]-trange);      ub = Int(lb+2*trange)
-# lb = Int(round(lb/10)*10);  ub = Int(round(ub/10)*10) 
+# Truncated time vector for event plots 
+peak = [tᵢ[evID];i⁺[evID]]    # Time and interval of event peak
+lb = Int(peak[2]) - imax
+ub = Int(lb+2*trange-1) 
 tₑᵥ = t[lb:ub];     Lₑᵥ = length(tₑᵥ)
 
 #############################################################################################
@@ -138,6 +179,15 @@ if full
     display(plt)
     savefig(joinpath(postOFpath,"CompWaveSpectra.svg"))
     savefig(joinpath(postOFpath,"CompWaveSpectra.png"))
+
+    # Distribution of RespVal peaks
+    plt_PP = histogram(PosPeaks, normalize=:pdf)
+    display(plt_PP)
+
+    # Plot the selected response variable
+    pltRV = plot(t, RespVar, xlab="t [s]", ylab="RespVar", title=case_str, legend=:false)
+    plot!([t[1],t[end]], [MinPeakVal,MinPeakVal], line=:dot)
+    display(pltRV)
 end
 
 ## Comparative multi-plot of key responses to selected extreme event
@@ -166,7 +216,28 @@ plot!(tₑᵥ, maximum(Heave)*ones(Float64,Lₑᵥ), lab=L"max(z)", line=:dash)
 ### Concentrated plot (1+2+3+4)
 plt_event = plot(plt_eva, plt_evb, plt_evc, plt_evd, layout = @layout [a b; c d])
 display(plt_event)
-savefig(joinpath(figOF,"EE_resp.svg"))
-savefig(joinpath(figOF,"EE_resp.png"))
+savefig(joinpath(figOF,"EE$(evID)_resp.svg"))
+savefig(joinpath(figOF,"EE$(evID)_resp.png"))
 
+
+#############################################################################################
+if fev
+    for i ∈ 2:NoRows
+        plti = plot(xlab = "t [s]", title = "$(heads[i])", legend=:topleft, palette=[cb[11];cb[4];cb[8];cb[1]])
+        plot!(tₑᵥ, cont[lb:ub,i], lw=3, lab = "Full sim")
+        plot!(tₑᵥ, cont_ev[:,i], lw=2, lab = "Event")
+        plot!(tₑᵥ, cont_FWG[:,i], line=:dot, lw=2, lab = L"ReFoGWs")
+        # plot!(tₑᵥ, cont_SFWG[:,i], line=:dot, lw=2, lab = L"\sum g_n (t)")
+        # plot!(tₑᵥ, cont_NW[:,i], line=:dot, lw=2, lab = "Focused Wave")
+        display(plti)
+        # savefig(figOF*"/$(heads[i]).svg")
+        # savefig(figOF*"/$(heads[i]).png")
+    end
+
+    pltFairA = plot(xlab = "t [s]", title = "$(heads[8])", legend=:topleft, palette=[cb[11];cb[4];cb[8];cb[1]])
+    plot!(tₑᵥ, FAIRTEN2[lb:ub], lw=3, lab = "Full sim")
+    plot!(tₑᵥ, cont_FWG[:,8], lw=2, lab = L"ReFoGWs")
+    display(pltFairA)
+    savefig(joinpath(figOF,"FairA_ev$evID.svg"));  savefig(joinpath(figOF,"FairA_ev$evID.png"))
+end
 end

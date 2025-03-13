@@ -199,11 +199,6 @@ end
 
 #############################################################################################
 if frec
-    # OpenFAST elevation input file
-    fid_elev::String = "event_$(evID).Elev" # File name
-    open(joinpath(OFASTpath,"ExtElev","$(case_id)","$(run_id)",fid_elev), "w")
-    writedlm(joinpath(OFASTpath,"ExtElev","$(case_id)","$(run_id)",fid_elev), [tOG Val_LNR], '\t')
-
     # Event
     fid_ev = joinpath(evdir,"event") # File name
     open(fid_ev, "w")

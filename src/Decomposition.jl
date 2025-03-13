@@ -99,6 +99,33 @@ MinPeakVal = 2*std(Val_LNR) # Amplitude constraint (Hₛ/2)
 L_PeakVal, L_PeakPos, L_PeakId = peaks_max_ext(Val_LNR, tOG, MinPeakVal, MinPeakDist,true)
 
 #############################################################################################
+# Identify the script that calls the Decomposition module
+stack = stacktrace()
+calling_file = ""
+# Iterate over the stack trace to find the first non-standard library call
+for frame in stack
+    if frame.func == :include && isfile(joinpath(pwd(),"src",basename(string(frame.file))))
+        global calling_file = basename(string(frame.file))
+        println("Decomposition called from file: $calling_file")
+        break
+    end
+end
+
+# Suppress Decomposition module outputs if already been applied (relevant for Events module)
+if calling_file == "Events.jl"
+    fid_1st = joinpath(Decpath,"eta_lin")
+    if !isfile(fid_1st)
+        frec,fplot = true,true
+    else
+        println("PROMPT: Do you want to suppress record & plot for Decomposition module? (y/n)")
+        uinp = readline()
+        if uinp == "y"
+            frec,fplot = false,false
+        end
+    end
+end
+
+#############################################################################################
 ## PLOTS 
 if fplot
     # For JONSWAP spectrum comparisons

@@ -21,12 +21,22 @@ include("func/wave_theory.jl");  include("func/jonswap.jl")
 # Global variables
 ρ, g, _, d, _, _, _, fcut = WAVEGEM.GlobInp0
 T₀ₛ, T₀ₕ, T₀ₚ = WAVEGEM.FOWT[:]
-
+CET, evID = WAVEGEM.CET, WAVEGEM.evID
 #############################################################################################
 # IO directories
 Parent, _, _, _, _, _, _, _, Decpath, _ = WAVEGEM.GlobPaths
 
-Eventpath = joinpath(Decpath,WAVEGEM.evdir)
+if CET == 1        # Fairlead tension critical event
+    case_str = "MaxFair"
+elseif CET == 2    # Pitch critical event
+    case_str = "MaxPitch"
+elseif CET == 3    # CoM extreme displacement event 
+    case_str = "MaxCoM"
+else                # Response to extreme wave event
+    case_str = "MaxWave"
+end
+
+Eventpath = joinpath(Decpath,case_str,"EV$evID")
 fid_res = joinpath(Eventpath,"ERGEEs")  
 fid_1st = joinpath(Eventpath,"event_lin") # Path to event file of 1st order elevation
 fpar = joinpath(Decpath,"sim_pars")       # Simulation parameters file path
