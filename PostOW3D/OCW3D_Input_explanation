@@ -1,0 +1,163 @@
+Header
+IC -- IncWaveType -- accel_tol_fact
+Lx -- Ly -- Lz -- Nx -- Ny -- Nz -- GridX -- GridY -- GridZ -- GhostGridX -- GhostGridY -- GhostGridZ -- Bathymetry file
+alpha -- beta -- gamma -- alphaprecond -- betaprecond -- gammaprecond
+Nsteps -- dt -- timeintegration scheme  -- CFL -- RK4 ExtrapolationON/OFF
+gravitational acceleration -- water density
+solver -- GMRES Preconditioning -- Coarsening Strategy -- GMRESmaxiterations -- relative tolerance -- maxit -- cyclet -- pre-smoothings -- post-smoothings -- MGmaxgrids -- DOF breakeven
+H -- h -- L -- T -- WAVELorPER -- uEorS -- EorS -- nsteps -- maxiter
+StoreDataOnOff -- formattype -- iKinematics  -- nOutFiles
+xbeg -- xend -- xstride -- ybeg -- yend -- ystride -- tbeg -- tend -- tstride
+WGZxend -- WAZxbeg -- xstride -- WGZybeg -- WAZybeg -- ystride -- tmin -- tmax -- tstride
+LinearONOFF -- PressureTermONOFF
+SG-filtering on/off -- filter half width -- poly order -- sigma_filt(1) -- sigma_filt(2) -- sigma_filt(3)
+relaxation zones on/off -- transient time -- no. zones -- XorY -- ?
+x1 -- x2 -- y1 -- y2 -- ftype -- param -- XorY -- WavegenONOFF -- XorYgen -- degrees(=IC rotation)
+x1 -- x2 -- y1 -- y2 -- ftype -- param -- XorY -- WavegenONOFF -- XorYgen -- degrees(=IC rotation)
+PDampingOnOff -- number of zones
+x1 -- x2 -- y1 -- y2 -- gamma0 -- Gamma0 -- i_damperType
+Curvilinear on/off
+Wave type id -- Tp -- Hs -- d -- max(kh) -- seed1 -- seed2 -- xgenwave -- ygenwave -- gamma
+
+LINE 2: Initial Conditions (3 values)
+1)  IC - Set up Initial Conditions (SetupInitialConditions.f90):
+    IC = -1: read from the init file 'OceanWave3D.init' , Not implemented curvilinear!
+    IC =  0: determined by PressureTermOnOff and funPressureTerm.f90
+        PressureTermOnOff == 0: still water.
+        PressureTermOnOff == 1: 2D stationary Gaussian hump.
+        PressureTermOnOff == 2: 3D moving Gaussian hump.
+        PressureTermOnOff == 3: 3D moving tanh hump.
+        PressureTermOnOff == 4: 3D moving cos^2 ship-like shape.
+    IC =  1: Mildly nonlinear standing wave, deep water, in a rectangular domain (Agnon & Glozman (1996)).
+    IC =  2: Shallow water to Deep water (3D)
+    IC =  3: Whalin (3D)
+    IC =  4: Deep water, flat bottom, linear standing wave
+    IC =  5: Shallow water, flat bottom
+    IC =  6: Shallow to Deep Water
+    IC =  7: Flat bottom, depth defined from SF-wave
+    IC =  8: Linear standing wave (2D) + in curvilinear space rotation with an angle
+    IC =  9: Berkhoff (3D)
+    IC = 10: GD: SWENSE, Flat bottom, depth defined from SF-wave
+    IC = 11: Flat bottom, depth defined from SF-wave for semi circular channel.
+    IC = 12: Flat bottom, depth defined from SF-wave to check convergence
+    IC = 13: Linear standing wave (2D) + in curvilinear space rotation with an angle
+    IC = 14: Mildly nonlinear standing wave, deep water (Agnon & Glozman (1996)) with SWENSE
+    IC = 15: 2D submerged bar test
+    IC = 16: Henrik Bredmose 2009 JFM paper setup
+    IC = 17: Vincent and Briggs(3D)
+
+2)  IncWaveType=0: none,
+    IncWaveType=1: stream function,
+    IncWaveType=2: linear irregular waves (PM, JONSWAP, wave file)
+    IncWaveType=3: wave maker, Wave generation with flux condition on western boundary
+
+3)  accel_tol_fact - Optional local filtering based on free-surface acceleration to prevent breaking.:
+    Turned off if this value does not appear.
+    If no parameters are specified after IC on the same line choose default values (if Lz>0):
+    IncWaveType=0;  accel_tol_fact=1000 : no incident wave, no local smoothing (no local filtering to prevent breaking)
+
+LINE 3: Domain - Resolution (13 values)
+    7,8,9) 0 = even
+           1 = clustering (uneven)
+    10,11,12) 0 = off (Kinematic condition will be imposed directly - applies to GhostGridZ)
+              1 = on  (Ghost point layer included below bottom - applies to GhostGridZ)
+
+LINE 4: Finite difference (3 values) - Preconditioner (3 values)
+    Default: 3 3 3 1 1 1
+
+LINE 5: Time (5 values)
+    3) 1=RK4
+       2=lowstorage-RK45
+    4) if CFL/=0 then dt=CFL*dxmin/c, c based on the incident wave
+    5) extrapolationONOFF == 1: Optimization of RK scheme using extrapolation on seperate RK stages will be employed.
+
+LINE 6: Constants (2 values)
+    2) Default: rho = 1000
+
+LINE 7: Solver (11 values)
+solver, Precond, MGCoarseningStrategy, GMRESmaxiterations, reltol, abstol, maxit, cyclet, nu(1), nu(2), MGmaxgrids
+    1) 0 = DC
+       1 = GMRES
+    2) 0=none (Matrix free,DIRECT)
+       1=Linear LU(no elimination)
+       2=Linear LU(ghostpoints eliminated)
+       3=Multigrid (no elimination)
+    3) 0=Allan's, 1=Ole's
+
+LINE 8: Stream function solution parameters (9 values)
+HH, h, L, T, i_wavel_or_per, e_or_s_vel, i_euler_or_stokes, n_h_steps, n_four_modes
+(This line is not used unless IncWaveType==1)
+IncWaveType==0,2 def. values: 1 1 1 1 1 1 1 1 1
+
+LINE 9: Data Storage (4 values)
+StoreDataOnOff, formattype
+If formattype=20, then the line should read:
+StoreDataONOFF, formattype, iKinematics, nOutFiles
+    1) StoreDataOnOff=0 -> no output,
+       StoreDataOnOff=+stride-> binary,
+       StoreDataOnOff=-stride -> ascii every stride time steps.
+    2) formattype=0, binary;
+       formattype=1, unformatted
+    3)
+    4) Kinematics output requested in nOutFiles file(s) named "Kinematics_**.bin".
+formattype==21,22: APEK - Configuration designed for extracting data on a per time step basis
+formattype/=20,21,22 -> iKinematics = 0
+
+LINE 10: Domain & Time resolution start/stop/stride (9 values)
+xbeg -- xend -- xstride -- ybeg -- yend -- ystride -- tbeg -- tend -- tstride
+nx(1) -- nx(end) -- by 1 -- ny(1) -- ny(end) -- by 1 -- nt(1) -- nt(end) -- by 1
+
+LINE 11: Relaxation zone setup - Output file tmin,tmax
+
+LINE 12: Mode, applied free-surface pressure (2 values)
+    1) LinearONOFF = 0,1: linear / fully nonlinear model is employed
+    2) PressureTermONOFF = 0: No free-surface pressure term is being applied
+       PressureTermONOFF = 1: A 2D Gaussian surface pressure is being applied
+       PressureTermONOFF = 2: A 3D Gaussian surface pressure is being applied
+       PressureTermONOFF = 3: A 3D tanh surface pressure is being applied
+       PressureTermONOFF = 4: A 3D cos^2 surface pressure is being applied
+       else No pressure field defined for PressureTermOnOff
+
+LINE 13: SG-FILTERING (6 values)
+filteringONOFF, filterALPHA, filterORDER, sigma_filt(1), sigma_filt(2), sigma_filt(3)
+    1) 0,1 = off/on
+    2) filter half width
+    3) polynomial order
+    4,5,6)  Filter Initialization - Boundary filtering
+
+LINE 14: Relaxation zones (5 values)
+    1) 0,1 = off/on
+    2) Ramp time
+    3) No. of zones (WGZ, WAZ)
+
+LINE 15: Wave Generation Zone (10 values)
+    1-4) x,y start/end
+    5) ftype = +/- 9,10: sign gives direction
+
+LINE 16: Wave Absorption Zone (10 values)
+    1-4) x,y start/end
+    5) ftype = +/- 9,10: sign gives direction
+
+LINE 17: Damping pressure zone (2 values)
+    1)  PDampingOnOff = 0,1: off,on
+    2)  No. of zones
+
+LINE 18: Damping pressure zone parameters (7 values)
+x1 -- x2 -- y1 -- y2 -- gamma0 -- Gamma0 -- i_damperType (0=friction on the velocity, 1=friction on the potential)
+    1-4) x,y start/end
+    5)  dynamic FSBC
+    6)  kinematic FSBC
+    7)  i_damperType=0: friction on the velocity
+        i_damperType=1:friction on the potential
+
+LINE 19: Curvilinear (1 value)
+    1) 1,0 = on/off
+
+LINE 20: Wave type - JONSWAP parameters
+Wave type id -- Tp -- Hs -- d -- max(kh) -- seed1 -- seed2 -- x of gen. wave -- y of gen. wave (centered at (x,y)) -- gamma
+    1)  Wave type id = 1: Wave theory
+        Wave type id = 2: Stream function
+        Wave type id = 3: JONSWAP
+        Wave type id = 4: PM
+        Wave type id = 5: Wave file
+        Wave type id = 6: Wave maker
