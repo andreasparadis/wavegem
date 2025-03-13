@@ -1,4 +1,6 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+clc
+clear all
 % Global paths
 OFastHome = fullfile("/run","media","data_storage","ONISILOS","OFAST")
 addpath(genpath(fullfile(OFastHome,"matlab-toolbox")))
@@ -6,10 +8,10 @@ OFastOut = pwd();
 
 % Flags
 wout = true    % Write output files
-WTid = 2;      % Which wind turbine? (1: Semi-submersible, 2: Mike's FOWT)
+WTid = 1;      % Which wind turbine? (1: Semi-submersible, 2: Mike's FOWT)
 WaveCase = 5;  % Case as in Hydrodyn/WAVES (if not 0 or 3, make changes below)
-SScase = 'LAE'; % Sea-state case (Depending on Hs,Tp and short or long simul.)
-SSrun = '11';  % Sea-state run under specified case
+SScase = 'LCH'; % Sea-state case (Depending on Hs,Tp and short or long simul.)
+SSrun = '13';  % Sea-state run under specified case
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Specify paths depending on simulation type
@@ -29,12 +31,12 @@ elseif WaveCase == 3 % White noise input
 elseif WaveCase == 5 % Externally generated surface elevation
     Runfld = fullfile('SE',SScase,SSrun)
 else
-    Runfld = 'JS_8m_10s'
+    Runfld = 'InitOG'
 end
 % For wave event simulations
 if WaveCase == 5
   EEv = ''; % '', MaxFair_#, MaxPitch_#, MaxCoM_#, MaxWave_#
-  SimCase = ''; % '', 'event', 'FWG', 'DAM', '2AM', 'SFWG', 'DWG' or 'NW'
+  SimCase = ''; % '', 'EV#', 'ReFoGWs', 'DAM', '2AM', 'SFWG', 'DWG' or 'NW'
   JulPath = fullfile('/home','andreasp','WAVEGEM','library', Runfld, '0','postOFAST',EEv);
 else
   EEv = '';
@@ -43,15 +45,18 @@ else
 end
 
 %% Which outputs?
-FASTfilesDesc = {"Time","PtfmSurge", "PtfmHeave", "PtfmPitch", "PtfmYaw",...
+FASTfilesDesc = {"Time","PtfmSurge", "PtfmHeave", "PtfmPitch",...
               "Wave1Elev", "Wave1Elv1", "FAIRTEN1", "FAIRTEN2",...
-              "ANCHTEN1", "ANCHTEN2", "HydroFxi", "HydroFzi", "HydroMyi"}
+              "HydroFxi", "HydroFzi", "HydroMyi", "PtfmTAxt","PtfmTAzt" }
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Define necessary paths
 FOWTdir = fullfile(OFastOut,fWT);
 Casefld = fullfile(Runfld, EEv, SimCase);
 OutDir = fullfile(FOWTdir, Casefld);
+if ~isfolder(OutDir)
+    mkdir(OutDir)
+end
 
 %% Move simulation output files to the appropriate output folder
 suffixes = {".outb", ".out", ".sum", ".ech", ".chkp"};% Suffixes of output files
@@ -124,7 +129,7 @@ if WaveCase == 0
   % Damping ratios
   [pm, ipm] = max(PSDs(2:30,2));
   omn = 2*pi*FR(ipm+1); eigfreq(1) = FR(ipm+1);
-  zeta = 0.005;
+  zeta = 0.015;
   env = max(abs(outData{1,2}(:,2))) * exp(-zeta*omn*t);
 
   figure()
@@ -133,7 +138,7 @@ if WaveCase == 0
 
   [pm, ipm] = max(PSDs(2:end,3));
   omn = 2*pi*FR(ipm+1); eigfreq(2) = FR(ipm+1);
-  zeta = 0.02;
+  zeta = 0.015;
   env = max(abs(outData{1,2}(:,3))) * exp(-zeta*omn*t);
 
   figure()
@@ -142,7 +147,7 @@ if WaveCase == 0
 
   [pm, ipm] = max(PSDs(2:end,4));
   omn = 2*pi*FR(ipm+1); eigfreq(3) = FR(ipm+1);
-  zeta = 0.03;
+  zeta = 0.015;
   env = max(abs(outData{1,2}(:,4))) * exp(-zeta*omn*t);
 
   figure()
@@ -165,7 +170,10 @@ end
 if wout
   % Save output data to txt
   results = outData{1,2};
-  fname = fullfile(JulPath, "outD_", SimCase)
+  fname = fullfile(JulPath, ["outD_", SimCase])
+  if ~isfolder(JulPath)
+    mkdir(JulPath)
+  end
   save("-text", fname, "results");
 
   fid = fopen(fullfile(OutDir,"dataHdr"), 'w')
