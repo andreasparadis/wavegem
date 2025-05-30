@@ -104,3 +104,51 @@ function recon(prop, A̅ₒ, t̅ᶜ, T̅ₒ, β̃, Hₛ, Tₚ, Ω, t)
 
     return gₙ, ηᶜ, ηₙ, FR, MAG
 end
+
+function regress_gauss_fun(t,u,MinPeakVal,MinPeakDist,ϵ,Nτ,dτ,Tlb,Tub)
+    # Regression of a curve using a sum of Gaussian functions: G=∑gₙ, gₙ=aₙ exp(-((t-tᶜₙ)/Tₙ)²)
+    # Required inputs:
+    #   u=u(t), t: vectors of independent and dependent variables 
+    #   MinPeakVal, MinPeakDist: thresholds for peak detection
+    #   ϵ,Nτ,dτ,Tlb,Tub: Runge-Kutta solution parameters = accuracy, max. No of iterations, step of fictitious time, constraints for T
+
+    # Initialise parameter vectors
+    Ø = Array{Float64}(undef,0)
+    Tₒ, Aₒ, tᶜₒ = [Ø[:] for _ = 1:3]
+    i⁺ₒ = Array{Int64}(undef,0)
+
+    # Peak detection of maxima above given threshold and distance between them
+    # the "true" argument sorts in descending order based on A
+    A, tᶜ, i⁺, uₜ, uₜₜ = peaks_max_ext(u,t, MinPeakVal, MinPeakDist,true)
+    N = length(tᶜ)
+
+    ## Initial condition for L based on ∂ₜ²g(tᶜ) = ∂ₜ²u(tᶜ)
+    T = sqrt.(abs.(2*A./uₜₜ[i⁺]))     
+
+    # Definition of the ODE's dLₘ 
+    τ = zeros(Float64,Nτ)
+    [τ[i] = (i-1)*dτ for i ∈ 2:Nτ]
+    println("τₑ = ", τ[end])
+    fun(τ,T) = dLdτ(τ,T, t, A, tᶜ,u, dt)
+
+    # Solve optimization problem
+    Tₒₚₜ = RK4_nln_sys(τ,T,fun,Tlb,Tub,ϵ)
+
+    # Optimal values
+    pltCONV = plot(palette=:darkrainbow)
+
+    for n ∈ 1:N
+        plot!(pltCONV, Tₒₚₜ[2][:,n],xlab="i",ylab=L"T_o^i [s]",xscale=:log10,lab="To[$(n)]",lw=2,leg=:outerbottom,legendcolumns=N)
+        if Tₒₚₜ[1][n] > Tcut
+            push!(Tₒ, Tₒₚₜ[1][n])
+            push!(Aₒ, A[n])
+            push!(tᶜₒ, tᶜ[n])
+            push!(i⁺ₒ,i⁺[n])
+        end
+    end
+
+    # Resulting Gaussian approximation of the envelope
+    G = gauss_fun(t, Aₒ, tᶜₒ, Tₒ)
+
+    return Tₒ, Aₒ, tᶜₒ, i⁺ₒ, G, pltCONV
+end
