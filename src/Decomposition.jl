@@ -1,6 +1,6 @@
 module Decomposition
 using Plots, LaTeXStrings, DelimitedFiles, Dates, LinearAlgebra
-using FFTW, DSP, Statistics, BSplineKit
+using FFTW, DSP, Statistics, BSplineKit, Distributions
 import ColorSchemes.darkrainbow
 
 gr(fontfamily = "Computer Modern", titlefont = (11, "New Century Schoolbook Bold"))
@@ -203,14 +203,11 @@ if fplot
 
     mean(evAmax)
     # 8: Distribution of event durations (probably Rice)
-    # sDT = std(ΔTᵉ) / sqrt(2-π/2)
-    sDT = mean(ΔTᵉ) / sqrt(π/2)
-    xDT = range(0,maximum(ΔTᵉ),Nᵤₚ)
-    RayDT = xDT .* exp.((-xDT.^2)./(2*sDT^2)) ./ sDT^2
-    # plot_DTdistr = histogram(ΔTᵉ, bins=Nᵤₚ) 
-    plot_DTdistr = histogram(ΔTᵉ, normalize=:pdf) 
-    plot!(xlab="ΔT [s]", ylab="P(ΔT)", title="Distribution of event durations (Rayleigh?)")
-    plot!(xDT, RayDT)
+    WeiΔT = fit(Weibull, ΔTᵉ);  kʷ = WeiΔT.α;    λʷ = WeiΔT.θ
+    Wrang = range(0, maximum(ΔTᵉ), 2^9);  Wcurve = kʷ/λʷ * (Wrang/λʷ).^(kʷ-1) .* exp.(-(Wrang/λʷ).^kʷ)
+    plot_DTdistr = histogram(ΔTᵉ, normalize=:pdf, lab=:false) 
+    plot!(plot_DTdistr, xlab="ΔT [s]", ylab="P(ΔT)", title="Probabability density of event durations")
+    plot!(plot_DTdistr, Wrang, Wcurve, lw=2, lab="Weibull Fit: κ=$(round(kʷ*1e3)/1e3), λ=$(round(λʷ*1e3)/1e3)")
     
     # Plots to display
     display(plt_peaks)

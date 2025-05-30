@@ -51,9 +51,10 @@ else                # Response to extreme wave event
 end
 
 if CET ∈ [1;2;3]
-    f_tinst = joinpath(postOFpath,case_str*"_tinsts")   # OpenFAST events timestamps
+    f_tinst = joinpath(postOFpath,case_str*"_tinsts_1ptile")   # OpenFAST events timestamps
     cont = parse_fxw(f_tinst, 0)                        # Read timestamps file
     tinst = cont[:,1]                                   # Vector of time instances
+    println("Number of identified events: ", size(cont)[1])
 end
 
 evdir = joinpath(Decpath,case_str,"EV$evID") # Output directory

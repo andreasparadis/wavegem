@@ -1,6 +1,6 @@
 module PostOpenFast
 using Plots, LaTeXStrings, DelimitedFiles, Dates, LinearAlgebra
-using FFTW, DSP, Statistics, BSplineKit
+using FFTW, DSP, Statistics, BSplineKit, StatsBase, Distributions
 
 include("WAVEGEM.jl")
 import .WAVEGEM
@@ -44,11 +44,16 @@ NoRows = size(cont)[2]
 # dt = 0.01
 # t = zeros(Float64,Nₜ)
 # [t[i] = (i-1)*dt for i ∈ 1:Nₜ]  
-# Surge, Heave, Pitch, Wave1Elev, Wave1Elev1, FAIRTEN1, FAIRTEN2, 
-# HydroFxi, HydroFzi, HydroMyi, PtfmTAxt, PtfmTAzt = [cont[:,i] for i = 1:NoRows]
+
+# Surge, Heave, Pitch, Wave1Elev, Wave1Elev1, FAIRTEN1, FAIRTEN2, AnchTen1, AnchTen2,
+# HydroFxi, HydroFzi = [cont[:,i] for i = 1:NoRows]
+
+# t, Surge, Heave, Pitch, Wave1Elev, Wave1Elev1, FAIRTEN1, FAIRTEN2, 
+# HydroFxi, HydroFzi, HydroMyi = [cont[:,i] for i = 1:NoRows]
 
 t, Surge, Heave, Pitch, Wave1Elev, Wave1Elev1, FAIRTEN1, FAIRTEN2, 
 HydroFxi, HydroFzi, HydroMyi, PtfmTAxt, PtfmTAzt = [cont[:,i] for i = 1:NoRows]
+
 aCoM = sqrt.(PtfmTAxt.^2 .+ PtfmTAzt.^2)  # CoM acceleration
 Nₜ = length(t)       
 dt = t[2]-t[1]
@@ -60,15 +65,19 @@ RespVar = zeros(Float64,Nₜ) # The response variable to be analysed
 if CET == 1        # Fairlead tension critical event
     RespVar[:] = FAIRTEN2[:]
     case_str = "MaxFair"
+    varname = "Fairlead tension"
 elseif CET == 2    # Pitch critical event
     RespVar[:] = Pitch[:]
     case_str = "MaxPitch"
+    varname = "Pitch"
 elseif CET == 3    # CoM extreme displacement event 
     RespVar[:] = disp[:]
     case_str = "MaxCoM"
+    varname = "Centre of mass"
 else                # Response to extreme wave event
     RespVar[:] = Wave1Elev[:]
     case_str = "MaxWave"
+    varname = "Surface elevation"
 end
 figOF = joinpath(postOFpath,case_str)
 ## Make directory for specified event if it doesn't exist
@@ -76,34 +85,110 @@ if !isdir(figOF)
     mkdir(figOF)
 end
 
-# Find all maxima above a given threshold of the selected response time history
-PosPeaks, _ = peaks_max_ext(RespVar,t, RespVar[1], 0, false)
+#############################################################################################
+# Response Statistics
+StatMetrics = [mean(RespVar); std(RespVar); median(RespVar); rms(RespVar); skewness(RespVar); kurtosis(RespVar)-3]
+RefVar = StatMetrics[4]   # Reference/normalisation variable (rms, median, mean, RespVar[1])
+## Find all maxima above a given threshold of the selected response time history
+RespVar_Peaks, _ = peaks_max_ext(RespVar.-RefVar,t, 0, 0, false)
+
+## Distribution of normalised peaks with reference to the rms value - Weibull
+SampVar = RespVar_Peaks./RefVar   # Sample
+WeibFit = fit(Weibull, SampVar);  kʷ = WeibFit.α;    λʷ = WeibFit.θ # Distribution fit
+WeibRange = range(minimum(SampVar), maximum(SampVar), 2^9);  WeibPDF = pdf.(WeibFit, WeibRange)  # Theoretical distribution
+WeibCDF = cdf.(WeibFit, WeibRange)
+ptile = 1/100;  F̅₁ₚ = λʷ * (-log(ptile))^1/kʷ;     F₁ₚ = (F̅₁ₚ+1)*RefVar
+### Plot PDF - Compare sample & fit
+hplt_F2 = histogram(SampVar, normalize=:pdf, lab=:false, palette=[cb[8]; cb[11]; cb[2]; cb[5]])
+plot!(hplt_F2, title="PDF - $varname maxima", xlab=L"\frac{F_p}{F^{rms}}-1", ylab="P(f)")
+plot!(hplt_F2, WeibRange, WeibPDF, lw=2, lab="Weibull: κ=$(round(kʷ*1e3)/1e3), λ=$(round(λʷ*1e3)/1e3)")
+plot!(hplt_F2,[mean(SampVar)+3*std(SampVar); mean(SampVar)+3*std(SampVar)], [0; maximum(WeibPDF)], ls=:dashdot, lab=L"\mu+3\sigma")
+plot!([F̅₁ₚ; F̅₁ₚ], [0; maximum(WeibPDF)], ls=:dashdot, lab="Q($(ptile*100)%)")
+plot!(twinx(),WeibRange, 1 .-WeibCDF, lw=2, ylab="Quantile", lab="Q(p)", ylim=(0,1), legendposition=:bottomright, palette=[cb[5]], ls=:dash)
+### Q-Q plot of sample & fit
+data_quantiles = sort(SampVar)
+theor_quantiles = quantile.(WeibFit, (1:length(SampVar)) / (length(SampVar) + 1))
+QQ_WeibFit = plot(xlabel="Theoretical Quantiles", ylabel="Sample Quantiles", title="Q-Q Plot - $varname maxima", palette=[cb[11]; cb[8]])
+plot!(QQ_WeibFit, theor_quantiles, data_quantiles, lab="Weibull: κ=$(round(kʷ*1e3)/1e3), λ=$(round(λʷ*1e3)/1e3)", lw=2)
+plot!(QQ_WeibFit, theor_quantiles, theor_quantiles, linestyle=:dash, label="45°")
+
+## Distribution of signal values normalised to the rms value (Log-Normal)
+SampVar = RespVar./RefVar # Sample
+LogNormFit = fit(LogNormal, SampVar);    μˡⁿ = LogNormFit.μ;    σˡⁿ = LogNormFit.σ   # Distribution fit
+LogNormRange = range(0, maximum(SampVar), 2^9); LogNormPDF = pdf.(LogNormFit,LogNormRange)    # Theoretical distribution
+### Plot PDF - Compare sample & fit
+hplt_LNF2 = histogram(SampVar, normalize=:pdf, lab=:false, palette=[cb[8]; cb[11]; cb[5]])
+plot!(hplt_LNF2, title="PDF - $varname response", xlab=L"\frac{F}{F_{rms}}", ylab="P(f)")
+plot!(hplt_LNF2, LogNormRange, LogNormPDF, lw=2, lab="Log-Normal: μ=$(round(μˡⁿ*1e3)/1e3), σ=$(round(σˡⁿ*1e3)/1e3)")
+## Q-Q plot
+data_quantiles = sort(SampVar)
+theor_quantiles = quantile.(LogNormFit, (1:length(SampVar)) / (length(SampVar) + 1))
+QQ_LogNorm = plot(xlabel="Theoretical Quantiles", ylabel="Sample Quantiles", title="Q-Q Plot - $varname", palette=[cb[11]; cb[8]])
+plot!(QQ_LogNorm, theor_quantiles, data_quantiles, lab="μ=$(round(μˡⁿ*1e3)/1e3), σ=$(round(σˡⁿ*1e3)/1e3)", lw=2)
+plot!(QQ_LogNorm, theor_quantiles, theor_quantiles, linestyle=:dash, lab="45°")
+
+StatMetrics = round.(StatMetrics.*1e3)./1e3
+fstmet = joinpath(postOFpath,case_str,"StatMetrics")
+Chead = ["μ" "σ" "med()" "rms()" "skew()" "kurt()"]
+open(fstmet, "w")
+writedlm(fstmet, [Chead;StatMetrics'], '\t')
 
 ## Find and sort extreme maxima in the selected response time history
-MinPeakVal = 5*std(RespVar) .+ mean(RespVar)    # Amplitude threshold (default=3*std)
+# cstd = 5     # Standard deviation coeffcient  (default=5)
+# MinPeakVal = cstd*std(RespVar) .+ mean(RespVar)    # Amplitude threshold
+MinPeakVal = F₁ₚ    # Amplitude threshold
+cstd = round((MinPeakVal-StatMetrics[1])/StatMetrics[2]*1e3)/1e3     # Standard deviation coeffcient
 Aᵢ, tᵢ, i⁺, _ = peaks_max_ext(RespVar,t, MinPeakVal, 0, true)
 Nce = length(Aᵢ)        # Number of peaks above threshold
 
-# Remove duplicate events
-## Instantaneous frequency
-ωᴴ,_ = instant_freq(RespVar,t)
-## Start point of corresponding event
-lbs = Array{Int64}(undef,0)
+# Identify corresponding wave events
+ωᴴ,_ = instant_freq(Wave1Elev,t)    # Instantaneous frequency
+## Starting point of corresponding event
+lbs = zeros(Int64,Nce)
+iᶠ = Array{Int64}(undef,0)
+Aᶠ = Array{Float64}(undef,0)
+tᶠ = Array{Float64}(undef,0)
+
 for i ∈ 1:Nce
     ilb = i⁺[i]
     while sign(ωᴴ[ilb]) == sign(ωᴴ[ilb-1]) && ilb > 2
         ilb = ilb - 1
     end
-    push!(lbs,ilb)
+    # Remove duplicates
+    if !(ilb ∈ lbs)
+        push!(iᶠ,i⁺[i])
+        push!(Aᶠ, Aᵢ[i])
+        push!(tᶠ, tᵢ[i])
+    end
+    lbs[i] = ilb
 end
-duplicates, non_duplicates = separate_duplicates(lbs)
-println("Duplicate events start time= ", t[Int.(duplicates)])
 
 ### Store time instances of maxima
 f_tinst = joinpath(postOFpath,case_str*"_tinsts")
+if cstd != 5
+    f_tinst = f_tinst*"_$(Int(ptile*100))ptile"
+end
 open(f_tinst, "w")
-writedlm(f_tinst, [tᵢ Aᵢ], '\t')
+writedlm(f_tinst, [tᶠ Aᶠ], '\t')
 
+# Statistical metrics for all responses
+RespStats = zeros(Float64,NoRows-1,7)   # Matrix summary of response statistics
+for i ∈ 2:NoRows
+    RVar = cont[:,i]
+    RespStats[i-1,1] = mean(RVar)
+    RespStats[i-1,2] = std(RVar)
+    RespStats[i-1,3] = median(RVar)
+    RespStats[i-1,4] = rms(RVar)
+    RespStats[i-1,5] = skewness(RVar)
+    RespStats[i-1,6] = kurtosis(RVar)-3
+    RespStats[i-1,7] = maximum(RVar)
+end
+RespStats = round.(RespStats.*1e3)./1e3
+fstats = joinpath(postOFpath,"RespStats")
+Chead = ["μ" "σ" "med()" "rms()" "skew()" "kurt()" "max()"]
+Rhead = ["Response"; heads[2:NoRows]]
+open(fstats, "w")
+writedlm(fstats, [Rhead [Chead;RespStats]], '\t')
 
 # Time histories
 if fev
@@ -129,12 +214,15 @@ if fev
     imax = findmax(cont_ev[:,8])[2] # Position of max fairten  
 else
     trange = Int(round(2^7/dt))
-    imax = 0
+    imax = trange
 end
 
 # Truncated time vector for event plots 
-peak = [tᵢ[evID];i⁺[evID]]    # Time and interval of event peak
+peak = [tᶠ[evID];iᶠ[evID]]    # Time and interval of event peak
 lb = Int(peak[2]) - imax
+if lb < 1
+    lb=1
+end
 ub = Int(lb+2*trange-1) 
 tₑᵥ = t[lb:ub];     Lₑᵥ = length(tₑᵥ)
 
@@ -179,15 +267,6 @@ if full
     display(plt)
     savefig(joinpath(postOFpath,"CompWaveSpectra.svg"))
     savefig(joinpath(postOFpath,"CompWaveSpectra.png"))
-
-    # Distribution of RespVal peaks
-    plt_PP = histogram(PosPeaks, normalize=:pdf)
-    display(plt_PP)
-
-    # Plot the selected response variable
-    pltRV = plot(t, RespVar, xlab="t [s]", ylab="RespVar", title=case_str, legend=:false)
-    plot!([t[1],t[end]], [MinPeakVal,MinPeakVal], line=:dot)
-    display(pltRV)
 end
 
 ## Comparative multi-plot of key responses to selected extreme event
@@ -219,6 +298,21 @@ display(plt_event)
 savefig(joinpath(figOF,"EE$(evID)_resp.svg"))
 savefig(joinpath(figOF,"EE$(evID)_resp.png"))
 
+# Plot the selected response variable
+pltRV = plot(t, RespVar, xlab="t [s]", ylab="RespVar", title=case_str, lab=:false, palette=[cb[11];cb[4];cb[8]])
+plot!([t[1],t[end]], [MinPeakVal,MinPeakVal], line=:dot, lw=2, lab=L"\mu+"*"$(cstd)std")
+plot!([0;t[end]],[rms(RespVar);rms(RespVar)], ls=:dash, lw=2, lab="rms(RespVar)")
+display(pltRV)
+# Distribution of RespVal peaks
+## Weibull fit & Log-normal fit
+plt_DistF2_1 = plot(hplt_F2, QQ_WeibFit, layout=@layout [a;b])
+display(plt_DistF2_1)
+savefig(joinpath(figOF,"Dist_FT2_max.svg"))
+savefig(joinpath(figOF,"Dist_FT2_max.png"))
+plt_DistF2_2 = plot(hplt_LNF2, QQ_LogNorm, layout=@layout [a;b])
+display(plt_DistF2_2)
+savefig(joinpath(figOF,"Dist_FT2.svg"))
+savefig(joinpath(figOF,"Dist_FT2.png"))
 
 #############################################################################################
 if fev
@@ -241,3 +335,25 @@ if fev
     savefig(joinpath(figOF,"FairA_ev$evID.svg"));  savefig(joinpath(figOF,"FairA_ev$evID.png"))
 end
 end
+
+# Move to response statistics to examine further responses (example here is Surge response)
+# ## Surge
+# μS = mean(Surge);    σS = std(Surge)
+# Nrang = range(μS-4*σS, μS+4*σS, 2^9);  Ncurve = 1/(σS*sqrt(2π)) * exp.(-((Nrang.-μS)/(sqrt(2)*σS)).^2)
+# hplt_S = histogram(Surge, normalize=:pdf, lab=:false)
+# plot!(hplt_S, title="Probability density function of Surge", xlab=L"Surge~[m]", ylab=L"P(Surge)")
+# plot!(hplt_S, Nrang, Ncurve, lw=2, lab="Normal Fit: μ=$(round(μS*1e3)/1e3), σ=$(round(σS*1e3)/1e3)")
+# ### Q-Q plot
+# NormS = fit(Normal,Surge)
+# data_quantiles = sort(Surge)
+# theor_quantiles = quantile.(NormS, (1:length(Surge)) / (length(Surge) + 1))
+# plot(theor_quantiles, data_quantiles, xlabel="Theoretical Quantiles", ylabel="Sample Quantiles", title="Surge Q-Q Plot", lab="μ=$(round(NormS.μ*1e3)/1e3), σ=$(round(NormS.σ*1e3)/1e3)")
+# plot!(theor_quantiles, theor_quantiles, linestyle=:dash, color=:red, label="45-degree line")
+
+# # Surge low-pass filter
+# fcˡᵖ = fcut/32;     fₛˡᵖ = round(1/dt);     Ntaps = nextpow(2,fₛˡᵖ/fcˡᵖ)   # No of taps
+# Surge_Low = low_pass_filter(Surge,fcˡᵖ,fₛˡᵖ,Ntaps)
+# display(plot(t, Surge_Low, title="Surge-Low-pass filter"))
+# # frS, magS,_ = one_side_asp(Surge_Low.-mean(Surge_Low),t)
+# # plot(frS,magS)
+# # plot!(xlim=(0,4*fcˡᵖ))

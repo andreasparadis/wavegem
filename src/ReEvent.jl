@@ -1,6 +1,6 @@
 module ReEvent
 # Load necessary modules
-using Plots, LaTeXStrings, LinearAlgebra, DelimitedFiles
+using Plots, LaTeXStrings, LinearAlgebra, DelimitedFiles, Printf
 using FFTW, DSP, Statistics, BSplineKit
 import ColorSchemes.darkrainbow
 
@@ -204,21 +204,22 @@ Sᵥ = 0.5/df .* magD.^2
 # Statistical measures
 ## Mean Square Errors
 MSEₜ = sum((η.-ηᴳ).^2) / Nₜ 
+NMSEₜ = MSEₜ/var(η)
 MSEₛ = sum((mag_η.-mag).^2) / Nₛ₂
+NMSEₛ = MSEₛ/var(mag_η)
 ## Cross-correlation
-CCRₜ = maximum(xcorr(η, ηᴳ))
-CCRₛ = maximum(xcorr(mag_η, mag))
-
+CCRₜ = maximum(xcorr(η, ηᴳ)/ (std(η) * std(ηᴳ) * Nₜ))
+CCRₛ = maximum(xcorr(mag_η, mag)/ (std(mag_η) * std(mag) * Nₛ₂))
 ## Cosine Similarity
 Na = sqrt(sum(η.^2));   Nb = sqrt(sum(ηᴳ.^2))
 CSₜ = dot(η, ηᴳ) / (Na*Nb) 
 Na = sqrt(sum(mag_η.^2));   Nb = sqrt(sum(mag.^2))
 CSₛ = dot(mag_η, mag) / (Na*Nb) 
 
-println("MSEₜ = $MSEₜ")
+println("NMSEₜ = $NMSEₜ")
 println("CCRₜ = $CCRₜ")
 println("CSₜ = $CSₜ")
-println("MSEₛ = $MSEₛ")
+println("NMSEₛ = $NMSEₛ")
 println("CCRₛ = $CCRₛ")
 println("CSₛ = $CSₛ")
 
@@ -287,6 +288,14 @@ if frec
     fid = joinpath(ReEvpath,evdir,"event.Elev")
     open(fid, "w")
     writedlm(fid, [t.+t₀ η], '\t')
+
+    fid = joinpath(ReEvpath,evdir,"recon_stats")
+    headSt = ["NMSEₜ" "CCRₜ" "CSₜ" "NMSEₛ" "CCRₛ" "CSₛ"]
+    rowSt = round.([NMSEₜ CCRₜ CSₜ NMSEₛ CCRₛ CSₛ]*1e3)./1e3 
+    # rowSt = [@sprintf("%.3e", num) for num in rowSt]
+    println("")
+    open(fid, "w")
+    writedlm(fid, [headSt; rowSt], '\t')
 
     suffix = "resamp_FR.fronts"
     fid = joinpath(ReEvpath,evdir,suffix)

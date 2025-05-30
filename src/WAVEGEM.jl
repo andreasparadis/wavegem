@@ -12,28 +12,23 @@ include("func/calc_globals.jl")
 #############################################################################################
 # Declaration of Global Variables
 ## Significant wave height [m], Peak period [s], peakedness [-]
-Hₛ, Tₚ, γ::Float64 = 8.0, 10.0, 3.3  # JONSWAP parameters
+Hₛ, Tₚ, γ::Float64 = 8.0, 12.0, 3.3  # JONSWAP parameters
 fₛ, Tₑ::Float64 = 2^3, 2^5           # Sampling frequency and return period 
 # fₛ, Tₑ::Float64 = 10, 25           # Sampling frequency and return period (old simulations)
-
-run_id::Int8 = 6    # Run identifier in each case (1,2,3..)
-phi_id::Int8 = 0    # Phase shift for decomposition: 0, 1, 2 , 3 == rand(), -π/2, -π, -3π/2
+run_id::Int8 = 5    # Run identifier in each case (1,2,3..)
+phi_id::Int8 = 0    # Phase shift for decomposition: 0, 1, 2 , 3 == rand(), +π/2, +π, +3π/2
 prb_id::Int8 = 4    # ID No of probe from OW3D simulations
 pdir::String = "SE" # Parent directory in library folder ("SE", "WM", "rand_seas" etc.)
-
 const ρ, g::Float64 = 1025.0, 9.81  # Sea water density [kg/m³], Accel. of gravity [m/s²]
 Ldom, d::Float64 = 2000.0, 100.0    # [m] Domain length, Water depth
-
 # Flags
 flong = true # Long simulation? Set true or false
-
 #############################################################################################
 # Calculated Global Variables
 Tᵢ, λ⁻, υ⁻, tₑ, fcut = time_lims(flong, Tₑ)
 GlobInp0 = (ρ, g, Ldom, d, Hₛ, Tₚ, γ, fcut)
 GlobInp1 = (pdir, run_id, phi_id, prb_id)
 GlobPaths = paths(pdir, run_id, phi_id, prb_id, flong)  # Paths
-
 #############################################################################################
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% MODULE-SPECIFIC INPUTS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#         
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#
@@ -46,7 +41,6 @@ Aid::Int8 = 0      # Amplitude coeffs - 0:ones(), 1:Normal, 2:Rayleigh, Other:ab
 
 SeaStateInp = (fₛ, Nₛ, Cr, Aid)
 ## ----------------------------------------------------------------------------------------##
-
 ## ----------------------------------- Decomposition --------------------------------------##
 # Module flags: true or false 
 Dflags = (true, true)    # 1: Record run?, 2: Plot results?
@@ -60,12 +54,10 @@ NP = 5  # Number of peaks to process (== No of events)
 
 DecSigs = ("eta0", "eta1", "eta2", "eta3") # Signal files for decomposition (~/Decomposition/)
 ## ----------------------------------------------------------------------------------------##
-
 #############################################################################################
-
 ##------------------------------- Event Global Variables ----------------------------------##
 CET::Int8 = 1  # Crit. event type = 1: Fairlead tension, 2: Pitch, 3: CoM disp, other: Wave
-evID::Int8 = 12 # Which event? (Sorted by descending amplitude)
+evID::Int8 = 1 # Which event? (Sorted by descending amplitude)
 
 ## ----------------------------------------------------------------------------------------##
 
