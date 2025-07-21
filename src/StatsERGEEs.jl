@@ -1,6 +1,6 @@
 # Load necessary modules
 using Plots, LaTeXStrings, LinearAlgebra, DelimitedFiles
-using FFTW, DSP, Statistics, BSplineKit, StatsBase, Distributions, Copulas
+using FFTW, DSP, Statistics, BSplineKit, StatsBase, Distributions, Copulas, Optim
 using CurveFit: linear_fit
 using StatsPlots
 import ColorSchemes.darkrainbow
@@ -11,13 +11,14 @@ cb = darkrainbow
 # Include necessary scripts for functions
 include("func/text_process.jl"); include("func/signal_processing.jl")
 include("func/peak_detect.jl");  include("func/runge_kutta.jl")
-include("func/fugees.jl");  include("func/directories.jl")
+include("func/fugees.jl");       include("func/directories.jl")
 include("func/wave_theory.jl");  include("func/jonswap.jl")
+include("func/stat_process.jl")
 
 #############################################################################################
 const ρ, g, d::Float64 = 1025.0, 9.81, 100.0  # density [kg/m³], gravity [m/s²], depth [m]
-Tₚⱼ = 10.0
-Hₛⱼ = 8.0
+Tₚⱼ = 8.0
+Hₛⱼ = 5.0
 Tₑ = 32
 Tcut = 1.88
 fcut = 1/Tcut
@@ -93,11 +94,12 @@ plot(Hₛᴿ, seriestype=:scatter, lab=:false, title="Hs of simulations")
 # Tₚ of runs
 plot(Tₚᴿ, seriestype=:scatter, lab=:false, title="Tp of simulations")
 
+#############################################################################################
 MaxNoEv = maximum(NoEv)
 allG = zeros(Float64,Nₜ,TotNoEv)
 all_sp2, all_phi = zeros(Float64,Nₛ₂,TotNoEv), zeros(Float64,Nₛ₂,TotNoEv)
 fsp2 = range(0.0,4.0,Nₛ₂)
-allΩ, allωₚ, allβ, alltᶜ, allAₒ, allTₒ, allT₂₋, allΔTₑᵥ, allΔtᶜ, maxAₒ  = [], [], [], [], [], [], [], [], [], []
+allΩ, allωₚ, allβ, allβ̇, alltᶜ, allAₒ, allTₒ, allT₂₋, allΔTₑᵥ, allΔtᶜ, allN, maxAₒ  = [], [], [], [], [], [], [], [], [], [], [], []
 TotEvID = 0
 
 for run_id ∈ FirstRun:(FirstRun+NoRuns-1)
@@ -125,9 +127,16 @@ for run_id ∈ FirstRun:(FirstRun+NoRuns-1)
         lenT = length(t̅ᶜ)
         cont2 = parse_fxw(fid_pG, 1)     # Read event and GR parameters
         Hₛ, Tₚ, Ω = cont2[1:3]
+        linfit_β̃ = linear_fit(t̅ᶜ,β̃)
+
+        if !isnan(linfit_β̃[2])
+            push!(allβ̇,linfit_β̃[2])
+        end
         push!(allΩ, Ω)
         push!(allωₚ, 2π/Tₚ)
         push!(maxAₒ, maximum(A̅ₒ))
+        push!(allN, lenT/ΔTₑᵥ)
+        
 
         for EWG ∈ 1:lenT
             push!(allAₒ,A̅ₒ[EWG])
@@ -196,70 +205,198 @@ H2 = vcat(H2,0,conj(H2[end:-1:2]))
 η₂₋ = real(ifft(H2))
 η₂₋ = [η₂₋[Int(Nₜ/2):end]; η₂₋[1:Int(Nₜ/2-1)]]
 
-t = t̅*T̃ₚᴿ
+t = t̅*Tₚⱼ
 # η = real(Hₛⱼ*Gmean.*exp.(-1im * mean(allΩ)*2π/Tₚⱼ * t̅*Tₚⱼ))
 
 plt_eta2 = plot(t, η₂₋, xlab = "t [s]", ylab = L"\eta_{2nd} ~[m]", lw=2)
 
+#############################################################################################
 # STATISTICAL ANALYSIS
-allΩ = Float64.(allΩ);  allβ = Float64.(allβ) 
+allΩ = Float64.(allΩ);  allβ = Float64.(allβ);  allβ̇ = Float64.(allβ̇);  allN = Float64.(allN)
 allAₒ = Float64.(allAₒ);    allTₒ = Float64.(allTₒ);    alltᶜ = Float64.(alltᶜ)
 allΔtᶜ = Float64.(allΔtᶜ);  allT₂₋ = Float64.(allT₂₋);  allΔTₑᵥ = Float64.(allΔTₑᵥ) 
+FairTen = Float64.(FairTen)
+GEE_stats = mean([allAₒ allTₒ alltᶜ], dims=1)
+std([allAₒ allTₒ alltᶜ], dims=1)
 
 ## Scatter plots
 pltΩ = plot([allΩ], seriestype=:scatter, legend=:false ,xlab="Event", ylab=L"\Omega=\frac{\tilde{\omega}}{\omega_p}~[-]")
 pltT2 = plot([allT₂₋], seriestype=:scatter, legend=:false ,xlab="Event", ylab=L"T_{2^-}~[s]")
 pltΔT = plot([allΔTₑᵥ], seriestype=:scatter, legend=:false ,xlab="Event", ylab=L"\Delta T_{ev}~[s]")
 pltFair = plot([FairTen], seriestype=:scatter, legend=:false ,xlab="Event", ylab="Fairlead Tension [kN]")
+pltN = plot([allN], seriestype=:scatter, legend=:false ,xlab="Event", ylab=L"\frac{No WGs}{\Delta T_{ev}}")
+
+### FairTen
+dataset = FairTen;   dist_type = LogNormal;  Nbins = 2^9
+pdf_values, fitted_dist, dist_params, samp_params, hst_plt, QQplt = dist_fit(dataset, dist_type, Nbins)
+plot!(hst_plt, title="PDF - P(FairTen)", xlab=L"F~[N]", ylab=L"P(F)")
+FitPlot = plot(hst_plt, QQplt, layout = @layout[a; b])
+AllFitPlots = [FitPlot]
+plt_img_names = ["Fairten_dist"]
+
+### Event Durations
+dataset = allΔTₑᵥ;   dist_type = LogNormal;  Nbins = 2^9
+pdf_values, fitted_dist, dist_params, samp_params, hst_plt, QQplt = dist_fit(dataset, dist_type, Nbins)
+plot!(hst_plt, title="PDF - P(ΔTₑᵥ)", xlab=L"\Delta T_{ev}~[s]", ylab=L"P(\Delta T_{ev})")
+FitPlot = plot(hst_plt, QQplt, layout = @layout[a; b])
+push!(AllFitPlots, FitPlot);    push!(plt_img_names, "DTev_dist")
 
 ## Histograms
 ### Ω
-μΩ = mean(allΩ);    σΩ = std(allΩ); 
-Nrang = range(μΩ-4*σΩ, μΩ+4*σΩ, 2^9);  Ncurve = 1/(σΩ*sqrt(2π)) * exp.(-((Nrang.-μΩ)/(sqrt(2)*σΩ)).^2)
-hplt_Ω = histogram(allΩ, normalize=:pdf, lab=:false)
-plot!(hplt_Ω, title="Probability density function: P(Ω)", xlab=L"Ω", ylab=L"P(Ω)")
-plot!(hplt_Ω, Nrang, Ncurve, lw=2, lab="Normal Fit: μ=$(round(μΩ*1e3)/1e3), σ=$(round(σΩ*1e3)/1e3)")
+dataset = allΩ;   dist_type = LogNormal;  Nbins = 2^9
+pdf_values, ΩFit, dist_params, samp_params, hst_plt, QQplt = dist_fit(dataset, dist_type, Nbins)
+plot!(hst_plt, title="PDF - P(Ω)", xlab=L"Ω", ylab=L"P(Ω)")
+FitPlot = plot(hst_plt, QQplt, layout = @layout[a; b])
+push!(AllFitPlots, FitPlot);    push!(plt_img_names, "om_tilde_dist")
+
+### β̇
+dataset = allβ̇ ;   dist_type = Normal;  Nbins = 2^9
+pdf_values, fitted_dist, dist_params, samp_params, hst_plt, QQplt = dist_fit(dataset, dist_type, Nbins)
+plot!(hst_plt, title="PDF - P(β̇)", xlab=L"\dot{\beta}~[rad]", ylab=L"P(\dot{\beta})")
+FitPlot = plot(hst_plt, QQplt, layout = @layout[a; b])
+push!(AllFitPlots, FitPlot);    push!(plt_img_names, "beta_dot_dist")
+
+### N
+dataset = allN;   dist_type = LogNormal;  Nbins = 2^9
+pdf_values, fitted_dist, dist_params, samp_params, hst_plt, QQplt = dist_fit(dataset, dist_type, Nbins)
+plot!(hst_plt, title="PDF: P(N̅)", xlab=L"\overline{N}", ylab=L"P(\overline{N})")
+FitPlot = plot(hst_plt, QQplt, layout = @layout[a; b])
+push!(AllFitPlots, FitPlot);    push!(plt_img_names, "NoWGs")
 
 ### Δtᶜ
-WeiΔtᶜ = fit(Weibull, allΔtᶜ);  kʷ = WeiΔtᶜ.α;    λʷ = WeiΔtᶜ.θ
-Wrang = range(0, maximum(allΔtᶜ), 2^9);  Wcurve = kʷ/λʷ * (Wrang/λʷ).^(kʷ-1) .* exp.(-(Wrang/λʷ).^kʷ)
-hplt_Dtc = histogram(allΔtᶜ, normalize=:pdf, lab=:false)
-plot!(hplt_Dtc, title="Probability density function: P(Δtᶜ)", xlab=L"\Delta t^c", ylab=L"P(\Delta t^c)")
-plot!(hplt_Dtc, Wrang, Wcurve, lw=2, lab="Weibull Fit: κ=$(round(kʷ*1e3)/1e3), λ=$(round(λʷ*1e3)/1e3)")
+dataset = allΔtᶜ;   dist_type = LogNormal;  Nbins = 2^9
+pdf_values, Δtᶜ_Fit, Δtᶜ_dist_params, samp_params, hst_plt, QQplt = dist_fit(dataset, dist_type, Nbins)
+plot!(hst_plt, title="PDF - P(Δtᶜ)", xlab=L"\overline{\Delta t^c}", ylab=L"P(\overline{\Delta t^c})")
+FitPlot = plot(hst_plt, QQplt, layout = @layout[a; b])
+push!(AllFitPlots, FitPlot);    push!(plt_img_names, "tc_diff_dist")
 
 ### Tₒ
-WeiTₒ = fit(Weibull, allTₒ);  kʷ = WeiTₒ.α;    λʷ = WeiTₒ.θ
-Wrang = range(0, maximum(allTₒ), 2^9);  Wcurve = kʷ/λʷ * (Wrang/λʷ).^(kʷ-1) .* exp.(-(Wrang/λʷ).^kʷ)
-hplt_To = histogram(allTₒ, normalize=:pdf, lab=:false)
-plot!(hplt_To, title="Probability density function: P(Tₒ)", xlab=L"T_o", ylab=L"P(T_o)")
-plot!(hplt_To, Wrang, Wcurve, lw=2, lab="Weibull Fit: κ=$(round(kʷ*1e3)/1e3), λ=$(round(λʷ*1e3)/1e3)")
+dataset = allTₒ;   dist_type = LogNormal;  Nbins = 2^9
+pdf_values, Tₒ_Fit, dist_params, samp_params, hst_plt, QQplt = dist_fit(dataset, dist_type, Nbins)
+plot!(hst_plt, title="PDF - P(T̅ₒ)", xlab=L"\overline{T}_o", ylab=L"P(\overline{T}_o)")
+FitPlot = plot(hst_plt, QQplt, layout = @layout[a; b])
+push!(AllFitPlots, FitPlot);    push!(plt_img_names, "To_dist")
+
+### tᶜ
+dataset = alltᶜ;   dist_type = Cauchy;  Nbins = 2^9
+pdf_values, tᶜ_Fit, dist_params, samp_params, hst_plt, QQplt = dist_fit(dataset, dist_type, Nbins)
+plot!(hst_plt,  title="PDF - P(t̅ᶜ)", xlab=L"\overline{t}^c", ylab=L"P(\overline{t}^c)")
+FitPlot = plot(hst_plt, QQplt, layout = @layout[a; b])
+push!(AllFitPlots, FitPlot);    push!(plt_img_names, "tc_dist")
+# # Student-t Fit
+# initial_params = [mean(alltᶜ); std(alltᶜ)/10; 5.0]
+# lower_bounds = [mean(alltᶜ)-3*std(alltᶜ); 0.0; 2.0]
+# upper_bounds = [mean(alltᶜ)+3*std(alltᶜ); 10.0; 500.0]
+# plt_hist, fitted_params, fitted_dist = student_fit(alltᶜ, initial_params, lower_bounds, upper_bounds)
+# display(plt_hist)
 
 ### Aₒ
-WeiAₒ = fit(Weibull, allAₒ);  kʷ = WeiAₒ.α;    λʷ = WeiAₒ.θ
-Wrang = range(0, maximum(allAₒ), 2^9);  Wcurve = kʷ/λʷ * (Wrang/λʷ).^(kʷ-1) .* exp.(-(Wrang/λʷ).^kʷ)
-hplt_Ao = histogram(allAₒ, normalize=:pdf, lab=:false)
-plot!(hplt_Ao, title="Probability density function: P(Aₒ)", xlab=L"A_o", ylab=L"P(A_o)")
-plot!(hplt_Ao, Wrang, Wcurve, lw=2, lab="Weibull Fit: κ=$(round(kʷ*1e3)/1e3), λ=$(round(λʷ*1e3)/1e3)")
+dataset = allAₒ;   dist_type = Weibull;  Nbins = 2^9
+pdf_values, Aₒ_Fit, dist_params, samp_params, hst_plt, QQplt = dist_fit(dataset, dist_type, Nbins)
+plot!(hst_plt,  title="PDF - P(A̅ₒ)", xlab=L"\overline{A}_o", ylab=L"P(\overline{A}_o)")
+FitPlot = plot(hst_plt, QQplt, layout = @layout[a; b])
+push!(AllFitPlots, FitPlot);    push!(plt_img_names, "Ao_dist")
 
+cvar = cov(hcat(alltᶜ,allAₒ))
+sigA = std(alltᶜ)
+sigB = std(allAₒ)
+
+## Pearson correlation coefficient
+rho = cvar ./ (sigA * sigB)
+#############################################################################################
 # Copulas
-AₒCDF = cdf.(WeiAₒ,allAₒ)
-TₒCDF = cdf.(WeiTₒ,allTₒ)
-# AT_cop = fit(FrankCopula,[TₒCDF AₒCDF])
-# # Create a grid for plotting
-# grid_size = length(AT_cop)
-# A_grid = collect(range(0, stop=1, length=grid_size))
-# T_grid = collect(range(0, stop=1, length=grid_size))
-# # Evaluate the copula density on the grid
-# dens = zeros(grid_size, grid_size)
-# dens = [pdf(AT_cop, [Ti, Ai]) for Ti in T_grid, Ai in A_grid]
-# for (i, Ti) in enumerate(T_grid)
-#     for (j, Ai) in enumerate(A_grid)
-#         dens[i, j] = pdf(AT_cop, [Ti; Ai])
-#     end
-# end
-# # Plot the copula density
-# contour(T_grid, A_grid, dens, fill=true, c=:viridis, title="Gaussian Copula Density", xlabel="To ", ylabel="Ao")
+## C[F(Tₒ),F(Aₒ)]
+JPD_TₒAₒ, Cop_TₒAₒ, plt_cop_TₒAₒ, plt_cop_TₒAₒ_OG = copula2d_fit_eval(GaussianCopula,allTₒ,allAₒ,Tₒ_Fit,Aₒ_Fit,2^16,100)
+### Add labels to the copula density plots
+plot!(plt_cop_TₒAₒ_OG, xlabel=L"\overline{T}_o", ylabel=L"\overline{A}_o")
+plot!(plt_cop_TₒAₒ, xlabel=L"P(\overline{T}_o)", ylabel=L"P(\overline{A}_o)")
 
+## C[F(Aₒ),F(Tₒ)]
+JPD_AₒTₒ, Cop_AₒTₒ, plt_cop_AₒTₒ, plt_cop_AₒTₒ_OG = copula2d_fit_eval(GaussianCopula,allAₒ,allTₒ,Aₒ_Fit,Tₒ_Fit,2^16,100)
+### Add labels to the copula density plots
+plot!(plt_cop_AₒTₒ_OG, xlabel=L"\overline{A}_o", ylabel=L"\overline{T}_o")
+plot!(plt_cop_AₒTₒ, xlabel=L"P(\overline{A}_o)", ylabel=L"P(\overline{T}_o)")
+
+## C[F(tᶜ),F(Aₒ)]
+JPD_tᶜAₒ, Cop_tᶜAₒ, plt_cop_tᶜAₒ, plt_cop_tᶜAₒ_OG = copula2d_fit_eval(GaussianCopula,alltᶜ,allAₒ,tᶜ_Fit,Aₒ_Fit,2^16,100)
+### Add labels to the copula density plots
+plot!(plt_cop_tᶜAₒ_OG, xlabel=L"\overline{t}^c", ylabel=L"\overline{A}_o")
+plot!(plt_cop_tᶜAₒ, xlabel=L"P(\overline{t}^c)", ylabel=L"P(\overline{A}_o)")
+
+### Sample from resulting joint probability distribution P(x₁,x₂)
+# Binning of of the conditioning variable x₁
+## Range for x₁ (lower and upper bound)   
+x₁_hrange = mean(alltᶜ)+std(alltᶜ)   
+
+Δtᶜ_μ = Δtᶜ_dist_params[1]
+Δtᶜ_σ = Δtᶜ_dist_params[2]
+Δtᶜ_var = (exp(Δtᶜ_σ^2)-1)*exp(2*Δtᶜ_μ+Δtᶜ_σ^2)
+σᴮ = sqrt(Δtᶜ_var)    # Use of standard deviation of appropriate dataset to determine width of bin
+wᴮ = 2*σᴮ   # Width of bin
+
+x₁ˡᵇ = -(Int(floor(x₁_hrange/wᴮ))+0.5)*wᴮ   
+x₁ᵘᵇ = (Int(floor(x₁_hrange/wᴮ))+0.5)*wᴮ 
+Nᴮ = Int(floor((x₁ᵘᵇ-x₁ˡᵇ)/wᴮ)) + 1  # Number of bins
+x₁_bins = range(x₁ˡᵇ,x₁ᵘᵇ,Nᴮ)   # Central values of bins for the x₁ range
+
+plt_tcbins = plot(xlab=L"t~[s]", ylab=L"A_o~[m]")
+for i ∈ 1:Nᴮ
+    plot!(plt_tcbins, [x₁_bins[i].*Tₚⱼ; x₁_bins[i].*Tₚⱼ], [0; maximum(allAₒ)*Hₛⱼ], ls=:dash, leg=:false)
+end
+
+x₁ᶜ = x₁_bins[Int(floor(Nᴮ/2))+1] # Which bin?
+hist_x2, hist_x1x2, x₁_samp, x₂_samp, x₁_range = conditional_sampling(JPD_tᶜAₒ,10000,x₁ᶜ,wᴮ)
+
+dataset = x₂_samp;   dist_type = Weibull;  Nbins = 2^9
+pdf_values, fitted_dist, dist_params, samp_params, hst_plt, QQplt = dist_fit(dataset, dist_type, Nbins)
+plot!(hst_plt,  title="PDF - P(A̅ₒ|tᶜ bin = $(round(x₁ᶜ*1000)/1000)", xlab=L"\overline{A}_o", ylab=L"P(\overline{A}_o)")
+FitPlot = plot(hst_plt, QQplt, layout = @layout[a; b])
+
+Aₒ_WeiFits = zeros(Float64,Nᴮ,2)
+Aₒ_WeiModes = zeros(Float64,Nᴮ)
+plt_BinDist = plot(xlab=L"t^c", ylab=L"\overline{A}_o", zlab=L"P(\overline{A}_o)")
+# Distribution of Aₒ per tᶜ bin
+for j ∈ 1:Nᴮ
+    x₁ᶜ = x₁ˡᵇ + j*wᴮ - wᴮ/2 # Which bin?
+    tᶜ_samp, Aₒ_samp = [], []
+    for i ∈ 1:length(allAₒ)
+        if alltᶜ[i] < (x₁ᶜ+wᴮ/2) && alltᶜ[i] > (x₁ᶜ-wᴮ/2)
+            push!(tᶜ_samp,alltᶜ[i])
+            push!(Aₒ_samp,allAₒ[i])
+        end
+    end
+    tᶜ_samp, Aₒ_samp = Float64.(tᶜ_samp), Float64.(Aₒ_samp)
+    println("Number of samples in this bin: $(length(Aₒ_samp))")
+
+    dataset = Aₒ_samp;   dist_type = Weibull;  Nbins = 2^9
+    pdf_values, fitted_dist, dist_params, samp_params, hst_plt, QQplt, Aₒ_Wrang = dist_fit(dataset, dist_type, Nbins)
+    plot3d!(plt_BinDist, x₁ᶜ*ones(Nbins), Aₒ_Wrang, pdf_values, lw=2, lab="t= $(round(x₁ᶜ*1000)/1000)")
+    # plot3d!(hst_plt,  title="PDF - P(A̅ₒ|tᶜ bin = $(round(x₁ᶜ*1000)/1000)", xlab=L"\overline{A}_o", ylab=L"P(\overline{A}_o)")
+    # display(hst_plt)
+
+    Aₒ_WeiFits[j,:] = dist_params[:]
+    kʷ = dist_params[1]
+    λʷ = dist_params[2]
+    mode_value = λʷ*((kʷ-1)/kʷ)^(1/kʷ)
+    Aₒ_WeiModes[j] = mode_value
+    # println("Weibull Mode Value: $mode_value")
+end
+display(plt_BinDist)
+
+## 3-variate copula: C[F(tᶜ), F(Tₒ), F(Aₒ)]
+JPD_tᶜTₒAₒ, Cop_tᶜTₒAₒ, plt_3vc_tᶜTₒ, plt_3vc_tᶜTₒ_OG, plt_3vc_tᶜAₒ, plt_3vc_tᶜAₒ_OG, plt_3vc_TₒAₒ, plt_3vc_TₒAₒ_OG = copula3d_fit_eval(GaussianCopula,alltᶜ,allTₒ, allAₒ,tᶜ_Fit,Tₒ_Fit, Aₒ_Fit,2^10,100)
+### Add labels to the copula density plots
+plot!(plt_3vc_tᶜTₒ_OG, xlabel=L"\overline{t}^c", ylabel=L"\overline{T}_o")
+plot!(plt_3vc_tᶜAₒ_OG, xlabel=L"\overline{t}^c", ylabel=L"\overline{A}_o")
+plot!(plt_3vc_TₒAₒ_OG, xlabel=L"\overline{T}_o", ylabel=L"\overline{A}_o")
+plot!(plt_3vc_tᶜTₒ, xlabel=L"P(\overline{t}^c)", ylabel=L"P(\overline{T}_o)")
+plot!(plt_3vc_tᶜAₒ, xlabel=L"P(\overline{t}^c)", ylabel=L"P(\overline{A}_o)")
+plot!(plt_3vc_TₒAₒ, xlabel=L"P(\overline{T}_o)", ylabel=L"P(\overline{A}_o)")
+
+plt_cop_tᶜTₒAₒ_OG = plot(plt_3vc_tᶜTₒ_OG, plt_3vc_tᶜAₒ_OG, plt_3vc_TₒAₒ_OG, layout= @layout[a b; c d], title = "3-variate copula f(tᶜ,T,A)")
+plt_cop_tᶜTₒAₒ = plot(plt_3vc_tᶜTₒ, plt_3vc_tᶜAₒ, plt_3vc_TₒAₒ, layout= @layout[a b; c d], title = "3-variate copula f(tᶜ,T,A)")
+
+#############################################################################################
 # Heatmaps
 ### Tₒ-Aₒ
 hplt_TA = histogram2d(allTₒ, allAₒ, normalize=:pdf, bins=:sqrt, show_empty_bins=true, color=:plasma, xlab = L"\overline{T}", ylab = L"\overline{A}")
@@ -275,10 +412,70 @@ etc = hist.edges[1]
 eA = hist.edges[2]
 probabs = (hist.weights / sum(hist.weights))'
 heat_tcA = heatmap(etc[1:end-1], eA[1:end-1], probabs, xlim=(-t̅ₑ,t̅ₑ), xlab = L"\overline{t}", ylab = L"\overline{A}")
+# surface(etc[1:end-1], eA[1:end-1], probabs, xlim=(-t̅ₑ,t̅ₑ), xlab = L"\overline{t}", ylab = L"\overline{A}",color=:plasma)
 
 ### tᶜ-Tₒ
 hplt_tcT = histogram2d(alltᶜ, allTₒ, normalize=:pdf, bins=(tcbins,Tobins), show_empty_bins=true, color=:plasma, xlab = L"\overline{t}", ylab = L"\overline{T}")
 
+#############################################################################################
+# Trying the tᶜ-A*tᶜ distribution
+σᵗᶜ = std(alltᶜ)
+alltᶜ_nz, iz = [], []
+for i ∈ 1:length(alltᶜ)
+    if alltᶜ[i] ≠ 0 && abs(alltᶜ[i]) < 3*σᵗᶜ
+        push!(alltᶜ_nz, alltᶜ[i])
+        push!(iz, i)
+    end
+end
+
+alltᶜ_nz =  Float64.(alltᶜ_nz); iz = Int.(iz)
+Aotc = allAₒ[iz]./alltᶜ_nz
+
+Aotc_bins = range(minimum(Aotc), maximum(Aotc), length=Int(round(sqrt(length(Aotc)))))
+hist_Aotc = fit(Histogram, Aotc, Aotc_bins, closed=:right)
+p_Aotc = (hist_Aotc.weights / sum(hist_Aotc.weights))
+plot(Aotc_bins[1:end-1], p_Aotc)
+
+μᴬᵗ = mean(abs.(Aotc)); σᴬᵗ = std(abs.(Aotc))
+
+Aotc_fin, ifin = [], []
+for i ∈ 1:length(Aotc)
+    if abs(Aotc[i]) < (Aotc_bins[2]-Aotc_bins[1])/2
+        push!(Aotc_fin, Aotc[i])
+        push!(ifin, i)
+    end
+end
+
+Aotc_fin = Float64.(Aotc_fin)
+alltᶜ_fin = alltᶜ_nz[ifin]
+
+plot(alltᶜ_fin,Aotc_fin, seriestype=:scatter)#, ylim=(-1,1))
+plot!(sort(alltᶜ_fin), π/2*exp.(-abs.(sort(alltᶜ_fin))).*coth.(sort(alltᶜ_fin)), lw=2)
+# plot!(sort(alltᶜ_fin), exp(1) * sign.(sort(alltᶜ_fin)) .* exp.(-abs.(sort(alltᶜ_fin))), lw=2)
+# plot!(sort(alltᶜ_fin), sign.(sort(alltᶜ_fin)) .* exp.(-sqrt.(abs.(sort(alltᶜ_fin)))), lw=2)
+
+plot(alltᶜ,allAₒ, seriestype=:scatter)
+plot!(alltᶜ_fin,Aotc_fin.*alltᶜ_fin, seriestype=:scatter)
+
+histogram2d(alltᶜ_fin,Aotc_fin, normalize=:pdf, show_empty_bins=true, color=:plasma, bins=:sqrt)
+histogram(Aotc_fin, normalize=:pdf, show_empty_bins=true, color=:plasma, bins=:sqrt)
+
+dataset = Aotc_fin;   dist_type = Cauchy;  Nbins = 2^9
+pdf_values, Aotc_Fit_fin, dist_params, samp_params, hst_plt, QQplt = dist_fit(dataset, dist_type, Nbins)
+plot!(hst_plt,  title="PDF - P(A̅ₒ/t̅ᶜ)",  xlab=L"\frac{\overline{A}_o}{\overline{t}_c}", ylab=L"P(\frac{\overline{A}_o}{\overline{t}_c})")
+FitPlot = plot(hst_plt, QQplt, layout = @layout[a; b])
+
+dataset = alltᶜ_fin;   dist_type = Normal;  Nbins = 2^9
+pdf_values, tᶜ_Fit_fin, dist_params, samp_params, hst_plt, QQplt = dist_fit(dataset, dist_type, Nbins)
+plot!(hst_plt,  title="PDF - P(t̅ᶜ)", xlab=L"\overline{t}^c", ylab=L"P(\overline{t}^c)")
+FitPlot = plot(hst_plt, QQplt, layout = @layout[a; b])
+
+JPD_tᶜAtc, Cop_tᶜAtc, plt_cop_tᶜAtc, plt_cop_tᶜAtc_OG = copula2d_fit_eval(GaussianCopula,alltᶜ_fin,Aotc_fin,tᶜ_Fit_fin,Aotc_Fit_fin,2^10,100)
+### Add labels to the copula density plots
+plot!(plt_cop_tᶜAtc_OG, xlabel=L"\overline{t}^c", ylabel=L"\frac{\overline{A}_o}{\overline{t}_c}")
+
+#############################################################################################
+# Interpolation of most probable envelope shape from t-A heatmap
 Aint = zeros(Float64, size(probabs)[2])
 
 for i ∈ 1:size(probabs)[2]
@@ -290,7 +487,7 @@ A_itp = interpolate(etc[1:end-1], Aint, BSplineOrder(4))
 Aᵢ = A_itp.(t̅)
 
 Aₒᵢ = zeros(Float64,Nₜ)
-Aₒᵢ[Int(Nₜ/2-2^9):Int(Nₜ/2+2^9)] = Aᵢ[Int(Nₜ/2-2^9):Int(Nₜ/2+2^9)]
+Aₒᵢ[Int(Nₜ/2-2^10):Int(Nₜ/2+2^10)] = Aᵢ[Int(Nₜ/2-2^10):Int(Nₜ/2+2^10)]
 
 fitβ̃ = linear_fit(alltᶜ,allβ)
 fitβ = linear_fit(alltᶜ.*T̃ₚᴿ,allβ)
@@ -324,14 +521,69 @@ if regress
     # Call the Gaussian Regression function
     Tₒ, Aₒ, tᶜₒ, i⁺ₒ, G, pltCONV = regress_gauss_fun(t,u,MinPeakVal,MinPeakDist,ϵ,Nτ,dτ,Tlb,Tub)
 else
+    NoGEEs = 9
     u = Aₒᵢ*H̃ₛᴿ
-    wdtc = rand(WeiΔtᶜ,6)
-    tᶜₒ = [-sum(wdtc[1:3]); -sum(wdtc[1:2]); -wdtc[1]; 0; wdtc[4]; sum(wdtc[4:5]); sum(wdtc[4:6])].*T̃ₚᴿ
-    i⁺ = Int.(round.(tᶜₒ./(t[2]-t[1]) .+ Int(Nₜ/2)))
-    Aₒ = u[i⁺]
-    Tₒ = rand(WeiTₒ,7).*T̃ₚᴿ
+    wdtc = rand(Δtᶜ_Fit,NoGEEs-1)
+    tᶜₘ = 0.0
+    # tᶜₘ = t̅[findmax(u)[2]]
+    # # tᶜₘ = -rand()
+    # tᶜₒ = [tᶜₘ-wdtc[1]; tᶜₘ; tᶜₘ+wdtc[2]].*T̃ₚᴿ
+    tᶜₒ = [tᶜₘ-sum(wdtc[1:4]); tᶜₘ-sum(wdtc[1:3]); tᶜₘ-sum(wdtc[1:2]); tᶜₘ-wdtc[1]; tᶜₘ; tᶜₘ+wdtc[5]; tᶜₘ+sum(wdtc[5:6]); tᶜₘ+sum(wdtc[5:7]); tᶜₘ+sum(wdtc[5:8])].*T̃ₚᴿ
+    
+    # Conditional sampling for Aₒ
+    Aₒ_range = range(0, maximum(allAₒ), length=2^9)
+    plt_weibs = plot3d(xlab=L"t^c", ylab=L"A_o" ,zlab="Density")
+    for i ∈ 1:NoGEEs
+        # _, _, _, Aₒ_samp, _ = conditional_sampling(JPD_tᶜAₒ,10000,tᶜₒ[i]/T̃ₚᴿ,wᴮ)
+        # pdf_Aₒ, fitted_dist, _ = dist_fit(Aₒ_samp, Weibull, 2^9)
+        bin_tᶜ = Int(floor((tᶜₒ[i]/T̃ₚᴿ-x₁ˡᵇ)/wᴮ)+1)
+        fitted_dist = Weibull(Aₒ_WeiFits[bin_tᶜ,1],Aₒ_WeiFits[bin_tᶜ,2])
+        pdf_Aₒ = pdf.(fitted_dist, Aₒ_range)
+        push!(Aₒ, rand(fitted_dist))
+        plot3d!(plt_weibs, ones(2^9)*tᶜₒ[i], Aₒ_range,pdf_Aₒ, lw=2, lab=L"P(A_o)"*"for GEE $i")
+    end
+    display(plt_weibs)
+
+    # Conditional sampling for Tₒ
+    Tₒ_range = range(0, maximum(allTₒ), length=2^9)
+    plt_weibs2 = plot3d(xlab=L"A_o", ylab=L"T_o" ,zlab="Density")
+    for i ∈ 1:NoGEEs
+        _, _, _, Tₒ_samp, _ = conditional_sampling(JPD_AₒTₒ,10000,Aₒ[i],std(allAₒ))
+        pdf_Tₒ, fitted_dist, _ = dist_fit(Tₒ_samp, LogNormal, 2^9)
+        Tₒⁱ = rand(fitted_dist)
+        while Tₒⁱ < Tcut/T̃ₚᴿ
+            Tₒⁱ = rand(fitted_dist)
+        end
+        push!(Tₒ, Tₒⁱ)
+        plot3d!(plt_weibs2, ones(2^9)*Aₒ[i], Tₒ_range,pdf_Tₒ, lw=2, lab=L"P(T_o)"*"for GEE $i")
+    end
+    display(plt_weibs2)
+
+    Aₒ = Aₒ.*H̃ₛᴿ
+    Tₒ = Tₒ.*T̃ₚᴿ
+
+    # i⁺ = Int.(round.(tᶜₒ./(t[2]-t[1]) .+ Int(Nₜ/2)))
+    # Aₒ = u[i⁺]
+    # Tₒ = rand(Tₒ_Fit,NoGEEs).*T̃ₚᴿ
+
+    # Aₒ = sqrt(2)*exp.(-abs.(tᶜₒ./T̃ₚᴿ)).*coth.(tᶜₒ./T̃ₚᴿ) .* tᶜₒ./T̃ₚᴿ .*H̃ₛᴿ
+
+    # P1 = rand(JPD_tᶜTₒAₒ,9)
+    # tᶜₒ = P1[1,:].*T̃ₚᴿ
+    # Tₒ = P1[2,:].*T̃ₚᴿ
+    # Aₒ = P1[3,:].*H̃ₛᴿ
+
+    # P2 = rand(JPD_TₒAₒ,9)
+    # Tₒ = P2[1,:].*T̃ₚᴿ
+    # Aₒ = P2[2,:].*H̃ₛᴿ
+
     G = gauss_fun(t, Aₒ, tᶜₒ, Tₒ)
 end
+
+plot!(plt_cop_TₒAₒ_OG, [Tₒ./T̃ₚᴿ], [Aₒ./H̃ₛᴿ], seriestype=:scatter, lab="Sampled")
+plot!(plt_cop_tᶜAₒ_OG, [tᶜₒ./T̃ₚᴿ], [Aₒ./H̃ₛᴿ], seriestype=:scatter, lab="Sampled")
+plot!(plt_tcbins, tᶜₒ, Aₒ, xlim=(-64,64), seriestype=:scatter, lab="Sampled")
+display(plt_tcbins)
 
 # Reconstruction
 lenT = length(Tₒ)
@@ -346,9 +598,7 @@ plt_demo = plot(palette=[cb[8];cb[11];cb[4]])
 
 prop = 0
 β̃ = fitβ[2]*tᶜₒ
-
-NDΩ = Normal(μΩ,σΩ)
-Ωₙ = rand(NDΩ,lenT)
+Ωₙ = rand(ΩFit,lenT)
 ωₚ = 2π/Tₚⱼ
 ωᵧ = 4*acos(exp(-1/4))./Tₒ
 ω₁ = mean(allΩ)*ωₚ
@@ -378,7 +628,7 @@ end
 # _, _, η₂, _ = recon(prop, 0.1, 0, 3, -π, Hₛⱼ, Tₚⱼ, 2π/Tᵖ₂₋, t)
 ηᴳ = real(TOT) #.+ real(η₂)
 # ηᴳ = real(TOT) .+ η₂₋
-plt_etaG = plot(t,ηᴳ,xlab="t [s]", ylab="η [m]", lw=2)
+plt_etaG = plot(t,ηᴳ,xlab="t [s]", ylab="η [m]", lw=2, xlim=(t[Int(Nₜ/2-2^10)], t[Int(Nₜ/2+2^10)]))
 
 # Gaussian approximation against envelope and scatter plot of peaks
 plt_envs = plot(xlab = L"t~[s]", ylab = L"[m]", palette=[cb[4];cb[8];cb[11]], legend=:outertop, legendcolumns=4)
@@ -399,57 +649,60 @@ stats_path = joinpath(libpath,"SE",case_id,"0")
 
 #############################################################################################
 # PLOTS
-display(pltΩ)
-savefig(pltΩ, joinpath(stats_path,"om_tilde.png"))
-savefig(pltΩ, joinpath(stats_path,"om_tilde.svg"))
-display(hplt_Ω)
-savefig(hplt_Ω, joinpath(stats_path,"om_tilde_dist.png"))
-savefig(hplt_Ω, joinpath(stats_path,"om_tilde_dist.svg"))
-display(pltT2)
-savefig(pltT2, joinpath(stats_path,"T2-.png"))
-savefig(pltT2, joinpath(stats_path,"T2-.svg"))
-display(pltΔT)
-savefig(pltΔT, joinpath(stats_path,"DTev.png"))
-savefig(pltΔT, joinpath(stats_path,"DTev.svg"))
-display(pltFair)
-savefig(pltFair, joinpath(stats_path,"FTstats.png"))
-savefig(pltFair, joinpath(stats_path,"FTstats.svg"))
-display(pltGEE1)
-savefig(pltGEE1, joinpath(stats_path,"EWGpars3D.png"))   
-savefig(pltGEE1, joinpath(stats_path,"EWGpars3D.svg"))
-display(pltGEE2)
-savefig(pltGEE2, joinpath(stats_path,"To-Ao.png"))
-savefig(pltGEE2, joinpath(stats_path,"To-Ao.svg"))
-display(hplt_Ao)
-savefig(hplt_Ao, joinpath(stats_path,"Ao_dist.png"))
-savefig(hplt_Ao, joinpath(stats_path,"Ao_dist.svg"))
-display(hplt_To)
-savefig(hplt_To, joinpath(stats_path,"To_dist.png"))
-savefig(hplt_To, joinpath(stats_path,"To_dist.svg"))
-display(pltGEE3)
-savefig(pltGEE3, joinpath(stats_path,"tc-To.png"))
-savefig(pltGEE3, joinpath(stats_path,"tc-To.svg"))
-display(pltGEE4)
-savefig(pltGEE4, joinpath(stats_path,"tc-Ao.png"))
-savefig(pltGEE4, joinpath(stats_path,"tc-Ao.svg"))
+for i ∈ 1:length(AllFitPlots)
+    display(AllFitPlots[i])
+    savefig(AllFitPlots[i],joinpath(stats_path,"$(plt_img_names[i]).png"))
+    savefig(AllFitPlots[i],joinpath(stats_path,"$(plt_img_names[i]).svg"))
+end
+
+# display(pltΩ)
+# savefig(pltΩ, joinpath(stats_path,"om_tilde.png"))
+# savefig(pltΩ, joinpath(stats_path,"om_tilde.svg"))
+
+# display(pltT2)
+# savefig(pltT2, joinpath(stats_path,"T2-.png"))
+# savefig(pltT2, joinpath(stats_path,"T2-.svg"))
+
+# display(pltΔT)
+# savefig(pltΔT, joinpath(stats_path,"DTev.png"))
+# savefig(pltΔT, joinpath(stats_path,"DTev.svg"))
+
+# display(pltFair)
+# savefig(pltFair, joinpath(stats_path,"FTstats.png"))
+# savefig(pltFair, joinpath(stats_path,"FTstats.svg"))
+
+display(plt_CStats)
+savefig(plt_CStats, joinpath(stats_path,"fairten_stats.png"))
+savefig(plt_CStats, joinpath(stats_path,"fairten_stats.svg"))
+# display(pltGEE1)
+# savefig(pltGEE1, joinpath(stats_path,"EWGpars3D.png"))   
+# savefig(pltGEE1, joinpath(stats_path,"EWGpars3D.svg"))
+# display(pltGEE2)
+# savefig(pltGEE2, joinpath(stats_path,"To-Ao.png"))
+# savefig(pltGEE2, joinpath(stats_path,"To-Ao.svg"))
+
+# display(pltGEE3)
+# savefig(pltGEE3, joinpath(stats_path,"tc-To.png"))
+# savefig(pltGEE3, joinpath(stats_path,"tc-To.svg"))
+# display(pltGEE4)
+# savefig(pltGEE4, joinpath(stats_path,"tc-Ao.png"))
+# savefig(pltGEE4, joinpath(stats_path,"tc-Ao.svg"))
 display(pltGEE5)
 savefig(pltGEE5, joinpath(stats_path,"t-beta.png"))
 savefig(pltGEE5, joinpath(stats_path,"t-beta.svg"))
-display(pltGEE6)
-savefig(pltGEE6, joinpath(stats_path,"tc_diff.png"))
-savefig(pltGEE6, joinpath(stats_path,"tc_diff.svg"))
-display(hplt_Dtc)
-savefig(hplt_Dtc, joinpath(stats_path,"tc_diff_dist.png"))
-savefig(hplt_Dtc, joinpath(stats_path,"tc_diff_dist.svg"))
-display(pltSP2)
-savefig(pltSP2, joinpath(stats_path,"sp_2nd-.png"))
-savefig(pltSP2, joinpath(stats_path,"sp_2nd-.svg"))
-display(pltPHI2)
-savefig(pltPHI2, joinpath(stats_path,"phi_2nd-.png"))
-savefig(pltPHI2, joinpath(stats_path,"phi_2nd-.svg"))
-display(plt_eta2)
-savefig(plt_eta2, joinpath(stats_path,"eta_2nd-.png"))
-savefig(plt_eta2, joinpath(stats_path,"eta_2nd-.svg"))
+# display(pltGEE6)
+# savefig(pltGEE6, joinpath(stats_path,"tc_diff.png"))
+# savefig(pltGEE6, joinpath(stats_path,"tc_diff.svg"))
+
+# display(pltSP2)
+# savefig(pltSP2, joinpath(stats_path,"sp_2nd-.png"))
+# savefig(pltSP2, joinpath(stats_path,"sp_2nd-.svg"))
+# display(pltPHI2)
+# savefig(pltPHI2, joinpath(stats_path,"phi_2nd-.png"))
+# savefig(pltPHI2, joinpath(stats_path,"phi_2nd-.svg"))
+# display(plt_eta2)
+# savefig(plt_eta2, joinpath(stats_path,"eta_2nd-.png"))
+# savefig(plt_eta2, joinpath(stats_path,"eta_2nd-.svg"))
 display(hplt_TA)
 savefig(hplt_TA, joinpath(stats_path,"hist_To-Ao.png"))
 savefig(hplt_TA, joinpath(stats_path,"hist_To-Ao.svg"))
@@ -459,9 +712,18 @@ savefig(hplt_tcA, joinpath(stats_path,"hist_tc-Ao.svg"))
 display(hplt_tcT)
 savefig(hplt_tcT, joinpath(stats_path,"hist_tc-To.png"))
 savefig(hplt_tcT, joinpath(stats_path,"hist_tc-To.svg"))
-display(pltG)
-savefig(pltG, joinpath(stats_path,"envelopes.png"))
-savefig(pltG, joinpath(stats_path,"envelopes.svg"))
+display(plt_cop_TₒAₒ_OG)
+savefig(plt_cop_TₒAₒ_OG, joinpath(stats_path,"Ao-To_copula.png"))
+savefig(plt_cop_TₒAₒ_OG, joinpath(stats_path,"Ao-To_copula.svg"))
+display(plt_cop_tᶜAₒ_OG)
+savefig(plt_cop_tᶜAₒ_OG, joinpath(stats_path,"tc-Ao_copula.png"))
+savefig(plt_cop_tᶜAₒ_OG, joinpath(stats_path,"tc-Ao_copula.svg"))
+display(plt_cop_tᶜTₒAₒ_OG)
+savefig(plt_cop_tᶜTₒAₒ_OG, joinpath(stats_path,"var3_copula.png"))
+savefig(plt_cop_tᶜTₒAₒ_OG, joinpath(stats_path,"var3_copula.svg"))
+# display(pltG)
+# savefig(pltG, joinpath(stats_path,"envelopes.png"))
+# savefig(pltG, joinpath(stats_path,"envelopes.svg"))
 display(plt_envs)
 savefig(plt_envs, joinpath(stats_path,"env_reg.png"))
 savefig(plt_envs, joinpath(stats_path,"env_reg.svg"))
@@ -474,17 +736,96 @@ savefig(pltEWG, joinpath(stats_path,"EWGs.svg"))
 display(pltSPEC)
 savefig(pltSPEC, joinpath(stats_path,"EWGs_spec.png"))
 savefig(pltSPEC, joinpath(stats_path,"EWGs_spec.svg"))
-display(plt_demo)
-savefig(plt_demo, joinpath(stats_path,"carrier.png"))
-savefig(plt_demo, joinpath(stats_path,"carrier.svg"))
+# display(plt_demo)
+# savefig(plt_demo, joinpath(stats_path,"carrier.png"))
+# savefig(plt_demo, joinpath(stats_path,"carrier.svg"))
 display(plt_etaG)
 savefig(plt_etaG, joinpath(stats_path,"DWE.png"))
 savefig(plt_etaG, joinpath(stats_path,"DWE.svg"))
-display(plt_CStats)
-savefig(plt_CStats, joinpath(stats_path,"fairten_stats.png"))
-savefig(plt_CStats, joinpath(stats_path,"fairten_stats.svg"))
+
 if regress
     display(pltCONV)
     savefig(pltCONV, joinpath(stats_path,"convergence.png"))
     savefig(pltCONV, joinpath(stats_path,"convergence.svg"))
 end
+
+
+# Summarise stats from all simulations
+TotΩ = allΩ;  Totβ = allβ;  Totβ̇ = allβ̇;  TotN = allN
+TotAₒ = allAₒ;    TotTₒ = allTₒ;    Tottᶜ = alltᶜ
+TotΔtᶜ = allΔtᶜ;  TotΔTₑᵥ = allΔTₑᵥ
+
+# TotΩ = [TotΩ; allΩ];  Totβ = [Totβ; allβ];  Totβ̇ = [Totβ̇; allβ̇];  TotN = [TotN;allN]
+# TotAₒ = [TotAₒ; allAₒ];    TotTₒ = [TotTₒ; allTₒ];    Tottᶜ = [Tottᶜ; alltᶜ]
+# TotΔtᶜ = [TotΔtᶜ; allΔtᶜ];  TotΔTₑᵥ = [TotΔTₑᵥ; allΔTₑᵥ] 
+
+# # Heatmaps
+# ### Tₒ-Aₒ
+# hplt_TA = histogram2d(TotTₒ, TotAₒ, normalize=:pdf, bins=:sqrt, show_empty_bins=true, color=:plasma, xlab = L"\overline{T}", ylab = L"\overline{A}")
+
+### tᶜ-Aₒ
+# tcbins = range(-t̅ₑ, t̅ₑ, length=74)
+# Aobins = range(0, 1.2, length=35)
+# Tobins = range(0, 3.5, length=35)
+# hplt_tcA = histogram2d(Tottᶜ, TotAₒ, normalize=:pdf, bins=(tcbins,Aobins), show_empty_bins=true, color=:plasma, xlab = L"\overline{t}", ylab = L"\overline{A}")
+
+# hist = fit(Histogram, (Tottᶜ, TotAₒ), (tcbins,Aobins), closed=:right)
+# etc = hist.edges[1]
+# eA = hist.edges[2]
+# probabs = (hist.weights / sum(hist.weights))'
+# heat_tcA = heatmap(etc[1:end-1], eA[1:end-1], probabs, xlim=(-t̅ₑ,t̅ₑ), xlab = L"\overline{t}", ylab = L"\overline{A}")
+
+# # Statistical Fits
+# dataset = TotΩ;   dist_type = LogNormal;  Nbins = 2^9
+# pdf_values, ΩFit, dist_params, samp_params, hst_plt, QQplt = dist_fit(dataset, dist_type, Nbins)
+# plot!(hst_plt, title="PDF - P(Ω)", xlab=L"Ω", ylab=L"P(Ω)")
+# FitPlot = plot(hst_plt, QQplt, layout = @layout[a; b])
+
+# ### β̇
+# dataset = Totβ̇ ;   dist_type = Normal;  Nbins = 2^9
+# pdf_values, fitted_dist, dist_params, samp_params, hst_plt, QQplt = dist_fit(dataset, dist_type, Nbins)
+# plot!(hst_plt, title="PDF - P(β̇)", xlab=L"\dot{\beta}~[rad]", ylab=L"P(\dot{\beta})")
+# FitPlot = plot(hst_plt, QQplt, layout = @layout[a; b])
+
+# ### N
+# dataset = TotN;   dist_type = Normal;  Nbins = 2^9
+# pdf_values, fitted_dist, dist_params, samp_params, hst_plt, QQplt = dist_fit(dataset, dist_type, Nbins)
+# plot!(hst_plt, title="PDF: P(N̅)", xlab=L"\overline{N}", ylab=L"P(\overline{N})")
+# FitPlot = plot(hst_plt, QQplt, layout = @layout[a; b])
+
+# ### Δtᶜ
+# dataset = TotΔtᶜ;   dist_type = LogNormal;  Nbins = 2^9
+# pdf_values, Δtᶜ_Fit, dist_params, samp_params, hst_plt, QQplt = dist_fit(dataset, dist_type, Nbins)
+# plot!(hst_plt, title="PDF - P(Δtᶜ)", xlab=L"\overline{\Delta t^c}", ylab=L"P(\overline{\Delta t^c})")
+# FitPlot = plot(hst_plt, QQplt, layout = @layout[a; b])
+
+# ### Tₒ
+# dataset = TotTₒ;   dist_type = LogNormal;  Nbins = 2^9
+# pdf_values, Tₒ_Fit, dist_params, samp_params, hst_plt, QQplt = dist_fit(dataset, dist_type, Nbins)
+# plot!(hst_plt, title="PDF - P(T̅ₒ)", xlab=L"\overline{T}_o", ylab=L"P(\overline{T}_o)")
+# FitPlot = plot(hst_plt, QQplt, layout = @layout[a; b])
+
+# ### tᶜ
+# dataset = Tottᶜ;   dist_type = Cauchy;  Nbins = 2^9
+# pdf_values, tᶜ_Fit, dist_params, samp_params, hst_plt, QQplt = dist_fit(dataset, dist_type, Nbins)
+# plot!(hst_plt,  title="PDF - P(t̅ᶜ)", xlab=L"\overline{t}^c", ylab=L"P(\overline{t}^c)")
+# FitPlot = plot(hst_plt, QQplt, layout = @layout[a; b])
+
+# ### Aₒ
+# dataset = TotAₒ;   dist_type = Weibull;  Nbins = 2^9
+# pdf_values, Aₒ_Fit, dist_params, samp_params, hst_plt, QQplt = dist_fit(dataset, dist_type, Nbins)
+# plot!(hst_plt,  title="PDF - P(A̅ₒ)", xlab=L"\overline{A}_o", ylab=L"P(\overline{A}_o)")
+# FitPlot = plot(hst_plt, QQplt, layout = @layout[a; b])
+
+# # Copulas
+# ## C[F(Tₒ),F(Aₒ)]
+# JPD_TₒAₒ, Cop_TₒAₒ, plt_cop_TₒAₒ, plt_cop_TₒAₒ_OG = copula2d_fit_eval(GaussianCopula,TotTₒ,TotAₒ,Tₒ_Fit,Aₒ_Fit,2^16,100)
+# ### Add labels to the copula density plots
+# plot!(plt_cop_TₒAₒ_OG, xlabel=L"\overline{T}_o", ylabel=L"\overline{A}_o")
+# plot!(plt_cop_TₒAₒ, xlabel=L"P(\overline{T}_o)", ylabel=L"P(\overline{A}_o)")
+
+# ## C[F(tᶜ),F(Aₒ)]
+# JPD_tᶜAₒ, Cop_tᶜAₒ, plt_cop_tᶜAₒ, plt_cop_tᶜAₒ_OG = copula2d_fit_eval(GaussianCopula,Tottᶜ,TotAₒ,tᶜ_Fit,Aₒ_Fit,2^16,100)
+# ### Add labels to the copula density plots
+# plot!(plt_cop_tᶜAₒ_OG, xlabel=L"\overline{t}^c", ylabel=L"\overline{A}_o")
+# plot!(plt_cop_tᶜAₒ, xlabel=L"P(\overline{t}^c)", ylabel=L"P(\overline{A}_o)")
