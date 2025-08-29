@@ -15,7 +15,7 @@ include("func/calc_globals.jl")
 Hₛ, Tₚ, γ::Float64 = 8.0, 12.0, 3.3  # JONSWAP parameters
 fₛ, Tₑ::Float64 = 2^3, 2^5           # Sampling frequency and return period 
 # fₛ, Tₑ::Float64 = 10, 25           # Sampling frequency and return period (old simulations)
-run_id::Int8 = 5    # Run identifier in each case (1,2,3..)
+run_id::Int8 = 0    # Run identifier in each case (1,2,3..)
 phi_id::Int8 = 0    # Phase shift for decomposition: 0, 1, 2 , 3 == rand(), +π/2, +π, +3π/2
 prb_id::Int8 = 4    # ID No of probe from OW3D simulations
 pdir::String = "SE" # Parent directory in library folder ("SE", "WM", "rand_seas" etc.)
@@ -97,6 +97,19 @@ ERGEEsInp = (fcˡᵖ, std_fac, MinPeakDist, RK_ϵ, RK_Nτ, RK_dτ, RK_Tlb, RK_Tu
 # The ReEvent module uses the event directory (evdir) specified in the ERGEEs module above.
 ReEvflags = true    # Record?
 Mprop::Int8 = 0     # Propagation method = 0:ReFoGWs, 1:DAM, 2:2AM, 3:a2AM
+## ----------------------------------------------------------------------------------------##
+
+##---------------------------------------- HyperGroup ----------------------------------------##
+HGwout = false   # Write HyperGroup file to OpenFast ExtElev directory
+gen_method::Int8 = 0     # Generation method = 0:Monte-Carlo, 1:GR, 2:GR mean
+# Choose to generate based on total statistics or for specified case
+specific = false
+stats_path = joinpath(pwd(),"library","SE","TotStats")
+if specific
+    stats_path = joinpath(pwd(),"library","SE",GlobPaths[2],"0")
+end
+
+HyperGroupInp = (stats_path, gen_method,HGwout)
 ## ----------------------------------------------------------------------------------------##
 
 ## ----------------------------- FOWT eigenfrequencies ------------------------------------##
