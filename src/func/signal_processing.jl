@@ -292,3 +292,56 @@ function cb_exp(fpath,fNo)
     writedlm(fid_cb, [PR_head; t PR1_6], '\t')
     println("Written $(fnames[fNo]) file")
 end
+
+function derivatives(x,t)
+    # Initialize variables
+    m = length(t)
+    𝚶⃗ₘ = zeros(Float64,m)
+    ẋ, ẍ = 𝚶⃗ₘ[:], 𝚶⃗ₘ[:]
+
+    # 1st differentiation
+    for i ∈ 2:m-1
+        ẋ[i] = (x[i+1] - x[i-1]) / (t[i+1]-t[i-1])
+    end
+
+    # Linear interpolation for first element
+    ẋ[1] = 2*ẋ[2]-ẋ[3]
+
+    # 2nd differentiation and storing of maxima and minima
+    for i ∈ 2:m-1
+        ẍ[i] = (ẋ[i+1] - ẋ[i-1]) / (t[i+1]-t[i-1])
+    end
+
+    # Linear interpolation of last element
+    ẍ[end] = 2*ẍ[end-1]-ẍ[end-2]
+
+    return ẋ, ẍ
+end
+
+function time_integration(t::Vector, ẋ::Vector, x0::Float64)
+    n = length(t)
+    dt = (t[end] - t[1])/(n-1)
+    x = zeros(Float64, n)  # Array to store values
+    x[1] = x0             # Set initial value
+
+    # Simpson's rule for most of the points
+    for i in 2:n-2
+        x[i+1] = x[i-1] + (dt / 3) * (ẋ[i-1] + 4*ẋ[i] + ẋ[i+1])
+    end
+
+    return x
+end
+
+function trapez_integral(t::Vector, ẋ::Vector, x0::Float64)
+    n = length(t)
+    dt = (t[end] - t[1])/(n-1)
+    x = zeros(Float64, n)  # Array to store values
+    x[1] = x0             # Set initial value
+
+    # Simpson's rule for most of the points
+    for i in 1:n-1
+        x[i+1] = x[i] + dt  * (ẋ[i] + ẋ[i+1])/2
+    end
+
+    return x
+end
